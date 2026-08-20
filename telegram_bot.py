@@ -31,14 +31,90 @@ logging.basicConfig(
 )
 logger = logging.getLogger("telegram_bot")
 
+import html
+import re
+
+def format_for_telegram(text: str) -> str:
+    """Convert AI markdown output into clean, reliable, and beautifully rendered Telegram HTML."""
+    if not text:
+        return ""
+    
+    # 1. Protect code blocks (```...```)
+    code_blocks = []
+    def save_cb(match):
+        code_blocks.append(match.group(1))
+        return f"___CODEBLOCK_{len(code_blocks)-1}___"
+    
+    formatted = re.sub(r'```(?:[a-zA-Z]*\n)?(.*?)```', save_cb, text, flags=re.DOTALL)
+    
+    # 2. Protect inline code (`...`)
+    inline_codes = []
+    def save_ic(match):
+        inline_codes.append(match.group(1))
+        return f"___INLINECODE_{len(inline_codes)-1}___"
+    
+    formatted = re.sub(r'`([^`]+)`', save_ic, formatted)
+    
+    # 3. Escape raw HTML entities
+    formatted = html.escape(formatted)
+    
+    # 4. Convert Markdown Headings (###, ##, #) to bold header lines
+    formatted = re.sub(r'^[ \t]*#{1,6}[ \t]+(.*)$', r'<b>\1</b>', formatted, flags=re.MULTILINE)
+    
+    # 5. Convert horizontal rules (--- or ***) to subtle dividers
+    formatted = re.sub(r'^[ \t]*[-*_]{3,}[ \t]*$', '───────────────', formatted, flags=re.MULTILINE)
+    
+    # 6. Convert Markdown Links [text](url) -> <a href="url">text</a>
+    def replace_link(match):
+        title = match.group(1)
+        url = html.unescape(match.group(2))
+        return f'<a href="{url}">{title}</a>'
+    
+    formatted = re.sub(r'\[([^\]]+)\]\((https?://[^\s\)]+)\)', replace_link, formatted)
+    
+    # 7. Convert bold (**text** or __text__)
+    formatted = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', formatted)
+    formatted = re.sub(r'__(.+?)__', r'<b>\1</b>', formatted)
+    
+    # 8. Convert single star *text* -> <b>text</b>
+    formatted = re.sub(r'(?<!\w)\*([^*\n]+?)\*(?!\w)', r'<b>\1</b>', formatted)
+    
+    # 9. Convert single underscore _text_ -> <i>text</i>
+    formatted = re.sub(r'(?<!\w)_([^_\n]+?)_(?!\w)', r'<i>\1</i>', formatted)
+    
+    # 10. Clean bullet points: `* ` or `- ` at line start -> `• `
+    formatted = re.sub(r'^[ \t]*[\*\-][ \t]+', '• ', formatted, flags=re.MULTILINE)
+    
+    # 11. Restore inline code and code blocks
+    for i, code in enumerate(inline_codes):
+        formatted = formatted.replace(f"___INLINECODE_{i}___", f"<code>{html.escape(code)}</code>")
+        
+    for i, code in enumerate(code_blocks):
+        formatted = formatted.replace(f"___CODEBLOCK_{i}___", f"<pre>{html.escape(code)}</pre>")
+        
+    return formatted
+
+async def send_clean_reply(message, text: str):
+    """Send a response formatted cleanly as Telegram HTML with fallback."""
+    formatted_html = format_for_telegram(text)
+    try:
+        await message.reply_text(
+            formatted_html,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True
+        )
+    except Exception as e:
+        logger.warning(f"HTML send failed ({e}), sending plain text")
+        await message.reply_text(text)
+
 async def check_auth(update: Update) -> bool:
     user_id = update.effective_user.id if update.effective_user else 0
     if not settings.is_authorized(user_id):
         logger.warning(f"Unauthorized access attempt from user ID {user_id}")
         if update.message:
             await update.message.reply_text(
-                f"⛔ *Access Denied:* Your Telegram User ID (`{user_id}`) is not authorized to interact with this Notion workspace.",
-                parse_mode=ParseMode.MARKDOWN
+                f"⛔ <b>Access Denied:</b> Your Telegram User ID (<code>{user_id}</code>) is not authorized to interact with this Notion workspace.",
+                parse_mode=ParseMode.HTML
             )
         return False
     return True
@@ -54,13 +130,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I am connected to your *Life Hub* workspace and ready to help you manage your projects, tasks, and notes from your phone.\n\n"
         "✨ *Things you can do:*\n"
         "• 💬 *Text me:* _'What are my high priority tasks for BSIT-31A?'_\n"
+        "• 📅 *Check Schedule:* _'Scan my calendar and schedule for today'_\n"
         "• 🎙️ *Send a Voice Note:* Hold the mic button and tell me what tasks or notes to record.\n"
         "• ➕ *Create Tasks:* _'Add task: Study for midterms due Friday'_\n"
         "• 🔍 *Search Workspace:* _'Find notes on Cianotes App'_\n"
         "• ✍️ *Append Notes:* _'Add bullet point to my Daily Journal: Completed project setup today'_\n\n"
         "Use /help to see more examples or /status to check connections."
     )
-    await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN)
+    await send_clean_reply(update.message, welcome_text)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
@@ -69,10 +146,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     help_text = (
         "💡 *Notion AI Assistant Help & Examples*\n\n"
-        "📋 *Tasks & Projects:*\n"
+        "📋 *Tasks & Schedule:*\n"
+        "• _'Scan my calendar schedule for today'_\n"
         "• _'List all active projects in my Life Hub'_\n"
         "• _'Add a high-priority task for BSIT-31A: 3D FaceModel activity'_\n"
-        "• _'Show me what is overdue or due this week'_\n\n"
+        "• _'Mark the task Study for Finals as Done'_\n\n"
         "📝 *Notes & Pages:*\n"
         "• _'Read the page BSIT-31A'_\n"
         "• _'Create a new page called Weekend Shopping List under Life Hub'_\n"
@@ -80,7 +158,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎙️ *Voice Notes:*\n"
         "• Simply send any voice message and I will transcribe and execute your request!"
     )
-    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+    await send_clean_reply(update.message, help_text)
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command."""
@@ -92,15 +170,16 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pages = notion_service.search_workspace(query="", filter_type="page")
         status_text = (
             "✅ *System Status: ALL SYSTEMS OPERATIONAL*\n\n"
-            f"• 🤖 *AI Engine:* Google Gemini 2.5 Flash\n"
+            "• 🤖 *AI Engine:* Google Gemini 3.7 Flash (Adaptive Thinking)\n"
             f"• 🗄️ *Notion Status:* Connected ({len(pages)} accessible pages found)\n"
             f"• 👤 *Authorized User ID:* `{update.effective_user.id}`\n"
-            "• 🎙️ *Voice Note Processing:* Active"
+            "• 🎙️ *Voice Note Processing:* Active\n"
+            "• ⚡ *Failover Fallback:* Gemini 3.6 Flash / 2.5 Flash"
         )
     except Exception as e:
         status_text = f"⚠️ *Notion Connection Error:* {str(e)}"
 
-    await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
+    await send_clean_reply(update.message, status_text)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming text message."""
@@ -122,11 +201,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_text
     )
 
-    try:
-        await update.message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
-    except Exception:
-        # Fallback to plain text if markdown parsing fails
-        await update.message.reply_text(reply)
+    await send_clean_reply(update.message, reply)
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming voice note."""
@@ -158,10 +233,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "audio/ogg"
     )
 
-    try:
-        await update.message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
-    except Exception:
-        await update.message.reply_text(reply)
+    await send_clean_reply(update.message, reply)
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     """Minimal HTTP server responding to cloud health checks (Render, Koyeb, Railway)."""
