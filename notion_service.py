@@ -122,19 +122,35 @@ class NotionService:
             "content": "\n".join(lines)
         }
 
-    def query_database(self, database_id: str, filter_json: Optional[Dict] = None, page_size: int = 10) -> List[Dict[str, Any]]:
-        """Query items in a Notion database."""
+    KNOWN_DATA_SOURCES = {
+        "d1527102528783299cac81b9d565b99b": "96927102528782d9bed487a7322ac310", # Tasks
+        "ba427102528782efbdce815b505396a2": "59827102528783dbb9e807b71c738058", # Projects
+        "51127102528782ed8a80816bc58e66a1": "97227102528782ad81b707fb6d42c4d5", # Workstreams
+        "2f37a332d3d2412eb52130f52c279318": "d4e6043c84e045d2a63b45ad038819f7", # Notes
+        "ea7c1cc69135485fbe4d0f7fd4947a00": "6e61a09d80e94e5ba56d0f94772cc1f1", # Thought Inbox
+    }
+
+    def query_database(self, database_id: str, filter_json: Optional[Dict] = None, page_size: int = 20) -> List[Dict[str, Any]]:
+        """Query items in a Notion database or data source."""
         self._ensure_client()
         clean_id = database_id.replace("-", "")
-        body: Dict[str, Any] = {"page_size": min(page_size, 50)}
+        body: Dict[str, Any] = {"page_size": min(page_size, 100)}
         if filter_json:
             body["filter"] = filter_json
 
+        target_ds_id = self.KNOWN_DATA_SOURCES.get(clean_id, clean_id)
+
         try:
-            response = self.client.data_sources.query(data_source_id=clean_id, **body)
+            response = self.client.data_sources.query(data_source_id=target_ds_id, **body)
         except Exception:
             try:
-                response = self.client.request(path=f"databases/{clean_id}/query", method="POST", body=body)
+                db = self.client.databases.retrieve(database_id=clean_id)
+                ds_list = db.get("data_sources", [])
+                if ds_list:
+                    ds_id = ds_list[0]["id"].replace("-", "")
+                    response = self.client.data_sources.query(data_source_id=ds_id, **body)
+                else:
+                    response = self.client.request(path=f"databases/{clean_id}/query", method="POST", body=body)
             except Exception as e:
                 logger.error(f"Error querying database {clean_id}: {e}")
                 return []
@@ -163,6 +179,8 @@ class NotionService:
                     page_props[name] = val.get("checkbox")
                 elif p_type == "number":
                     page_props[name] = val.get("number")
+                elif p_type == "relation":
+                    page_props[name] = [r.get("id") for r in val.get("relation", [])]
             
             items.append({
                 "id": page.get("id"),
@@ -170,6 +188,45 @@ class NotionService:
                 "properties": page_props
             })
         return items
+
+    def get_calendar_schedule(self, target_date: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Retrieve scheduled tasks and calendar events for a specific date (YYYY-MM-DD) or upcoming items."""
+        self._ensure_client()
+        # Find Tasks database / data source
+        tasks = self.query_database("d1527102-5287-8329-9cac-81b9d565b99b", page_size=50)
+        if not tasks:
+            # Fallback search
+            results = self.search_workspace(query="Tasks", filter_type="data_source")
+            if results:
+                tasks = self.query_database(results[0]["id"], page_size=50)
+
+        scheduled_items = []
+        for task in tasks:
+            props = task.get("properties", {})
+            task_name = props.get("Name") or "Untitled Task"
+            do_date = props.get("Do Date") or props.get("Date") or props.get("Due Date")
+            status = props.get("Status") or "Not started"
+            
+            if target_date:
+                if do_date and str(do_date).startswith(target_date):
+                    scheduled_items.append({
+                        "task": task_name,
+                        "date": do_date,
+                        "status": status,
+                        "url": task.get("url"),
+                        "properties": props
+                    })
+            else:
+                # Return all items with a date
+                if do_date:
+                    scheduled_items.append({
+                        "task": task_name,
+                        "date": do_date,
+                        "status": status,
+                        "url": task.get("url"),
+                        "properties": props
+                    })
+        return scheduled_items
 
     def _normalize_key(self, k: str) -> str:
         key_map = {

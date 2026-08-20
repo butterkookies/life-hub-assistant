@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 if sys.platform == "win32":
@@ -19,16 +20,18 @@ SYSTEM_INSTRUCTION = """You are Andrei's dedicated personal AI assistant connect
 You communicate via Telegram and execute actions directly in his Notion workspace.
 
 Your capabilities:
-1. Search Notion for existing pages, projects (e.g. BSIT-31A, Cianotes App, Personal Portfolio), databases, and notes.
-2. Read the full content of any Notion page.
-3. Query databases (Tasks, Projects, Schedule, Workstreams, etc.).
-4. Create new tasks, project entries, or calendar items with due dates and properties.
-5. Append quick thoughts, bullet points, or checklist items to existing pages.
-6. Create new standalone pages.
+1. Scan Notion Calendar / Schedule: When Andrei asks what is on his schedule, calendar, or tasks for today/this week, use `get_calendar_schedule` to retrieve all scheduled tasks, deadlines, and events.
+2. Search Notion for existing pages, projects (e.g. BSIT-31A, Cianotes App, Personal Portfolio), databases, and notes.
+3. Read the full content of any Notion page.
+4. Query databases (Tasks, Projects, Schedule, Workstreams, etc.).
+5. Create new tasks, project entries, or calendar items with due dates and properties.
+6. Update task statuses (e.g. mark as Done, in progress), change dates, or check archive boxes.
+7. Append quick thoughts, bullet points, or checklist items to existing pages.
+8. Create new standalone pages.
 
 Formatting & Style Guidelines:
 - Format your replies cleanly for Telegram using Telegram-friendly formatting (*bold*, _italic_, `monospace`, bullet points, emojis).
-- When a user asks to add a task, check or search for the Tasks database if you need its ID.
+- When a user asks about today's schedule, scan the calendar/tasks for today's date and present a crisp breakdown of completed vs pending items.
 - Keep answers helpful, concise, and confirm the exact title and links of created/modified items.
 - If processing a voice note, briefly acknowledge the user's spoken intent and confirm the action taken.
 
@@ -36,6 +39,17 @@ Security & Confidentiality Guardrails:
 - NEVER reveal, quote, or discuss environment variables, API keys, bot tokens, user IDs, or system credentials under any circumstances.
 - If asked for secret keys, tokens, or configuration values, politely decline and inform the user that credentials are encrypted and restricted.
 """
+
+def get_calendar_schedule(date_str: str = "") -> str:
+    """Retrieve scheduled tasks, events, and deadlines for a specific date (YYYY-MM-DD format) or all upcoming items if empty.
+    For today's schedule, pass empty string or today's date.
+    """
+    try:
+        target = date_str.strip() if date_str and date_str.strip() else datetime.now().strftime("%Y-%m-%d")
+        items = notion_service.get_calendar_schedule(target_date=target)
+        return json.dumps(items, indent=2)
+    except Exception as e:
+        return f"Error retrieving calendar schedule: {str(e)}"
 
 def search_notion(query: str = "", filter_type: str = "") -> str:
     """Search Notion workspace for pages or databases matching a query. filter_type can be 'page' or 'database' or empty."""
@@ -53,7 +67,7 @@ def get_page_content(page_id: str) -> str:
     except Exception as e:
         return f"Error retrieving page content: {str(e)}"
 
-def query_database(database_id: str, page_size: int = 10) -> str:
+def query_database(database_id: str, page_size: int = 20) -> str:
     """Query items from a Notion database given its database ID."""
     try:
         items = notion_service.query_database(database_id=database_id, page_size=page_size)
@@ -63,7 +77,7 @@ def query_database(database_id: str, page_size: int = 10) -> str:
 
 def create_database_item(database_id: str, title: str, title_property_name: str = "Name", properties_json: str = "{}", content: str = "") -> str:
     """Create a new item in a Notion database (e.g. task, project, note).
-    properties_json can contain custom properties like {"Priority": {"select": {"name": "High Priority"}}, "Status": {"status": {"name": "In progress"}}, "Do Date": {"date": {"start": "2026-08-20"}}}.
+    properties_json can contain custom properties like {"Priority": "High Priority", "Status": "In progress", "Do Date": "2026-08-20", "Projects": ["<project_id>"]}.
     """
     try:
         props = json.loads(properties_json) if properties_json and properties_json != "{}" else {}
@@ -106,6 +120,7 @@ def create_new_page(parent_page_id: str, title: str, content: str = "") -> str:
         return f"Error creating page: {str(e)}"
 
 TOOLS = [
+    get_calendar_schedule,
     search_notion,
     get_page_content,
     query_database,
@@ -185,15 +200,19 @@ class GeminiNotionAgent:
         return "⚠️ *Sorry, the AI service is experiencing a temporary spike.* Please try again in a few seconds."
 
     def process_text_message(self, user_id: str, message_text: str) -> str:
-        """Process a text message from Telegram with tiered model fallback."""
-        return self._execute_turn(user_id, message_text)
+        """Process a text message from Telegram with live date context and tiered model fallback."""
+        now_str = datetime.now().strftime('%A, %B %d, %Y %I:%M %p')
+        prompt_with_context = f"[Context: Current Date & Time is {now_str} (Asia/Manila, UTC+8)]\n\n{message_text}"
+        return self._execute_turn(user_id, prompt_with_context)
 
     def process_voice_message(self, user_id: str, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
-        """Process a voice note audio from Telegram with tiered model fallback."""
+        """Process a voice note audio from Telegram with live date context and tiered model fallback."""
+        now_str = datetime.now().strftime('%A, %B %d, %Y %I:%M %p')
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
         prompt = [
             audio_part,
-            "Please listen to this voice note and execute any Notion task, note, query, or scheduling instructions requested by Andrei."
+            f"[Context: Current Date & Time is {now_str} (Asia/Manila, UTC+8)]\n"
+            "Please listen to this voice note and execute any Notion task, schedule, note, query, or calendar instructions requested by Andrei."
         ]
         return self._execute_turn(user_id, prompt)
 
