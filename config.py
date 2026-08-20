@@ -1,4 +1,4 @@
-﻿import os
+import os
 from typing import List
 from dotenv import load_dotenv
 
@@ -36,7 +36,8 @@ class Settings:
     def is_authorized(self, user_id: int) -> bool:
         allowed = self.ALLOWED_TELEGRAM_USER_IDS
         if not allowed:
-            return True
+            # Strict Fail-Closed: deny all access if whitelist is not explicitly configured
+            return False
         return user_id in allowed
 
 settings = Settings()

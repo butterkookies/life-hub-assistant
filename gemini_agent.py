@@ -135,7 +135,7 @@ class GeminiNotionAgent:
             return response.text or "✅ Action completed in your Notion workspace."
         except Exception as e:
             logger.error(f"Error in Gemini agent: {e}", exc_info=True)
-            return f"⚠️ *Error processing request:* {str(e)}"
+            return "⚠️ *Sorry, I encountered an issue processing your request.* Please try again in a moment."
 
     def process_voice_message(self, user_id: str, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
         """Process a voice note audio from Telegram."""
@@ -150,6 +150,6 @@ class GeminiNotionAgent:
             return response.text or "✅ Voice note processed and executed in Notion."
         except Exception as e:
             logger.error(f"Error in voice processing: {e}", exc_info=True)
-            return f"⚠️ *Error processing voice note:* {str(e)}"
+            return "⚠️ *Sorry, I could not process that voice note.* Please try speaking again or send as a text message."
 
 gemini_agent = GeminiNotionAgent()
