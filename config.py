@@ -33,6 +33,16 @@ class Settings:
                 ids.append(int(clean))
         return ids
 
+    @property
+    def PORT(self) -> int:
+        load_dotenv(override=True)
+        return int(os.getenv("PORT", "8000"))
+
+    @property
+    def WEBHOOK_URL(self) -> str:
+        load_dotenv(override=True)
+        return os.getenv("WEBHOOK_URL", "").strip()
+
     def is_authorized(self, user_id: int) -> bool:
         allowed = self.ALLOWED_TELEGRAM_USER_IDS
         if not allowed:

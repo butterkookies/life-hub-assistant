@@ -2,6 +2,8 @@ import asyncio
 import io
 import logging
 import sys
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
 
 if sys.platform == "win32":
@@ -161,11 +163,35 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_text(reply)
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP server responding to cloud health checks (Render, Koyeb, Railway)."""
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"status":"healthy","service":"telegram-notion-ai-bot"}')
+
+    def log_message(self, format, *args):
+        # Suppress routine health check log noise
+        pass
+
+def start_health_server(port: int):
+    try:
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        logger.info(f"Health check HTTP server active on port {port}")
+    except Exception as e:
+        logger.warning(f"Could not bind health server on port {port}: {e}")
+
 def main():
     token = settings.TELEGRAM_BOT_TOKEN
     if not token:
         print("❌ Error: TELEGRAM_BOT_TOKEN is not set in .env")
         return
+
+    # Start background health server for Render / Koyeb / Railway port binding
+    start_health_server(settings.PORT)
 
     print("🤖 Starting Telegram Notion AI Bot...")
     
@@ -185,7 +211,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
 
-    print("🚀 Bot is running in polling mode. Waiting for messages from Telegram...")
+    print(f"🚀 Bot is running in polling mode on port {settings.PORT}. Waiting for messages from Telegram...")
     app.run_polling(bootstrap_retries=5)
 
 if __name__ == "__main__":
