@@ -41,6 +41,8 @@ class NotionService:
             obj_type = item.get("object")
             item_id = item.get("id")
             title = "Untitled"
+            parent = item.get("parent", {})
+            db_id = parent.get("database_id") if parent.get("type") == "database_id" else item_id
             
             if obj_type == "page":
                 props = item.get("properties", {})
@@ -56,7 +58,8 @@ class NotionService:
                     title = "".join(t.get("plain_text", "") for t in title_arr)
 
             results.append({
-                "id": item_id,
+                "id": db_id if obj_type == "data_source" else item_id,
+                "data_source_id": item_id if obj_type == "data_source" else None,
                 "type": obj_type,
                 "title": title or "Untitled",
                 "url": item.get("url"),
@@ -127,7 +130,15 @@ class NotionService:
         if filter_json:
             body["filter"] = filter_json
 
-        response = self.client.databases.query(database_id=clean_id, **body)
+        try:
+            response = self.client.data_sources.query(data_source_id=clean_id, **body)
+        except Exception:
+            try:
+                response = self.client.request(path=f"databases/{clean_id}/query", method="POST", body=body)
+            except Exception as e:
+                logger.error(f"Error querying database {clean_id}: {e}")
+                return []
+
         items = []
         for page in response.get("results", []):
             page_props = {}
@@ -160,6 +171,48 @@ class NotionService:
             })
         return items
 
+    def _normalize_key(self, k: str) -> str:
+        key_map = {
+            "project": "Projects",
+            "projects": "Projects",
+            "due": "Do Date",
+            "due date": "Do Date",
+            "due_date": "Do Date",
+            "date": "Do Date",
+            "status": "Status",
+            "priority": "Priority",
+            "archive": "Archive",
+            "workstream": "Workstream"
+        }
+        return key_map.get(k.strip().lower(), k)
+
+    def _format_property_val(self, k: str, v: Any) -> Dict[str, Any]:
+        """Format arbitrary Python types into Notion property structures."""
+        if isinstance(v, dict) and any(x in v for x in ["select", "date", "status", "checkbox", "relation", "title", "rich_text", "number", "people"]):
+            return v
+        elif isinstance(v, bool):
+            return {"checkbox": v}
+        elif isinstance(v, (int, float)):
+            return {"number": v}
+        elif isinstance(v, list):
+            # Treat array of strings / UUIDs as relations
+            return {"relation": [{"id": str(item_id).replace("-", "")} for item_id in v]}
+        elif isinstance(v, str):
+            lower_v = v.lower()
+            if lower_v in ["done", "in progress", "not started", "to-do", "complete", "completed"]:
+                name_map = {"done": "Done", "in progress": "In progress", "not started": "Not started", "to-do": "Not started", "complete": "Done", "completed": "Done"}
+                return {"status": {"name": name_map.get(lower_v, v)}}
+            elif "priority" in lower_v:
+                return {"select": {"name": v}}
+            elif len(v) == 10 and v.count("-") == 2: # YYYY-MM-DD
+                return {"date": {"start": v}}
+            elif len(v) in [32, 36] and ("-" in v or v.isalnum()) and k.lower() in ["projects", "project", "workstream"]:
+                # Single UUID as relation
+                return {"relation": [{"id": v.replace("-", "")}]}
+            else:
+                return {"rich_text": [{"text": {"content": v}}]}
+        return {"rich_text": [{"text": {"content": str(v)}}]}
+
     def create_database_item(self, database_id: str, title: str, title_prop_name: str = "Name",
                              properties: Optional[Dict[str, Any]] = None,
                              content: Optional[str] = None) -> Dict[str, Any]:
@@ -167,6 +220,14 @@ class NotionService:
         self._ensure_client()
         clean_id = database_id.replace("-", "")
         
+        # Check if clean_id is a data source and resolve to parent database_id
+        try:
+            ds = self.client.data_sources.retrieve(data_source_id=clean_id)
+            if ds.get("parent", {}).get("type") == "database_id":
+                clean_id = ds["parent"]["database_id"].replace("-", "")
+        except Exception:
+            pass
+
         props: Dict[str, Any] = {
             title_prop_name: {
                 "title": [{"text": {"content": title}}]
@@ -175,14 +236,10 @@ class NotionService:
         
         if properties:
             for k, v in properties.items():
-                if isinstance(v, dict) and ("select" in v or "date" in v or "status" in v or "checkbox" in v or "relation" in v):
-                    props[k] = v
-                elif isinstance(v, str):
-                    props[k] = {"rich_text": [{"text": {"content": v}}]}
-                elif isinstance(v, bool):
-                    props[k] = {"checkbox": v}
-                elif isinstance(v, (int, float)):
-                    props[k] = {"number": v}
+                norm_k = self._normalize_key(k)
+                if norm_k == title_prop_name:
+                    continue
+                props[norm_k] = self._format_property_val(norm_k, v)
 
         children = []
         if content:
@@ -201,8 +258,32 @@ class NotionService:
         if children:
             body["children"] = children
 
-        created = self.client.pages.create(**body)
-        return {"id": created.get("id"), "url": created.get("url"), "status": "created"}
+        try:
+            created = self.client.pages.create(**body)
+            return {"id": created.get("id"), "url": created.get("url"), "status": "created"}
+        except Exception as e:
+            # If property validation failed, retry with just title and basic status
+            logger.warning(f"Initial page create failed ({e}). Retrying with safe core properties...")
+            safe_props = {title_prop_name: {"title": [{"text": {"content": title}}]}}
+            if "Status" in props:
+                safe_props["Status"] = props["Status"]
+            safe_body = {"parent": {"database_id": clean_id}, "properties": safe_props}
+            if children:
+                safe_body["children"] = children
+            created = self.client.pages.create(**safe_body)
+            return {"id": created.get("id"), "url": created.get("url"), "status": "created"}
+
+    def update_page_properties(self, page_id: str, properties: Dict[str, Any]) -> Dict[str, Any]:
+        """Update properties of an existing Notion page or database item (e.g. status, priority, archive)."""
+        self._ensure_client()
+        clean_id = page_id.replace("-", "")
+        
+        props: Dict[str, Any] = {}
+        for k, v in properties.items():
+            props[k] = self._format_property_val(k, v)
+
+        updated = self.client.pages.update(page_id=clean_id, properties=props)
+        return {"id": updated.get("id"), "url": updated.get("url"), "status": "updated"}
 
     def append_to_page(self, page_id: str, text: str, block_type: str = "paragraph") -> Dict[str, Any]:
         """Append text blocks to an existing page."""

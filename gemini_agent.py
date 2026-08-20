@@ -78,6 +78,17 @@ def create_database_item(database_id: str, title: str, title_property_name: str 
     except Exception as e:
         return f"Error creating database item: {str(e)}"
 
+def update_page_properties(page_id: str, properties_json: str) -> str:
+    """Update properties of an existing Notion page or database item (e.g. task status to Done, change priority, or archive).
+    properties_json example: {"Status": "Done"} or {"Status": {"status": {"name": "Done"}}} or {"Priority": "High Priority"}.
+    """
+    try:
+        props = json.loads(properties_json) if properties_json and properties_json != "{}" else {}
+        res = notion_service.update_page_properties(page_id=page_id, properties=props)
+        return json.dumps(res, indent=2)
+    except Exception as e:
+        return f"Error updating page properties: {str(e)}"
+
 def append_to_page(page_id: str, text: str, block_type: str = "paragraph") -> str:
     """Append text to an existing Notion page. block_type can be 'paragraph', 'bulleted_list_item', 'heading_2', or 'to_do'."""
     try:
@@ -99,9 +110,12 @@ TOOLS = [
     get_page_content,
     query_database,
     create_database_item,
+    update_page_properties,
     append_to_page,
     create_new_page
 ]
+
+FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-flash-latest"]
 
 class GeminiNotionAgent:
     def __init__(self):
@@ -113,43 +127,56 @@ class GeminiNotionAgent:
         if not self.client:
             self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
-    def _get_chat(self, user_id: str):
+    def _get_chat(self, user_id: str, model_name: str = "gemini-2.5-flash"):
         self._ensure_client()
-        if user_id not in self.chats:
+        chat_key = f"{user_id}_{model_name}"
+        if chat_key not in self.chats:
             config = types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION,
                 tools=TOOLS,
                 temperature=0.7
             )
-            self.chats[user_id] = self.client.chats.create(
-                model="gemini-2.5-flash",
+            self.chats[chat_key] = self.client.chats.create(
+                model=model_name,
                 config=config
             )
-        return self.chats[user_id]
+        return self.chats[chat_key]
 
     def process_text_message(self, user_id: str, message_text: str) -> str:
-        """Process a text message from Telegram and execute actions."""
-        try:
-            chat = self._get_chat(user_id)
-            response = chat.send_message(message_text)
-            return response.text or "✅ Action completed in your Notion workspace."
-        except Exception as e:
-            logger.error(f"Error in Gemini agent: {e}", exc_info=True)
-            return "⚠️ *Sorry, I encountered an issue processing your request.* Please try again in a moment."
+        """Process a text message from Telegram with automatic model fallback."""
+        last_error = None
+        for model in FALLBACK_MODELS:
+            try:
+                chat = self._get_chat(user_id, model)
+                response = chat.send_message(message_text)
+                return response.text or "✅ Action completed in your Notion workspace."
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Model {model} failed: {e}. Retrying with next model fallback...")
+                continue
+
+        logger.error(f"All fallback models failed: {last_error}", exc_info=True)
+        return "⚠️ *Sorry, the AI service is experiencing a temporary spike.* Please try again in a few seconds."
 
     def process_voice_message(self, user_id: str, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
-        """Process a voice note audio from Telegram."""
-        try:
-            chat = self._get_chat(user_id)
-            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
-            prompt = [
-                audio_part,
-                "Please listen to this voice note and execute any Notion task, note, query, or scheduling instructions requested by Andrei."
-            ]
-            response = chat.send_message(prompt)
-            return response.text or "✅ Voice note processed and executed in Notion."
-        except Exception as e:
-            logger.error(f"Error in voice processing: {e}", exc_info=True)
-            return "⚠️ *Sorry, I could not process that voice note.* Please try speaking again or send as a text message."
+        """Process a voice note audio from Telegram with automatic model fallback."""
+        audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
+        prompt = [
+            audio_part,
+            "Please listen to this voice note and execute any Notion task, note, query, or scheduling instructions requested by Andrei."
+        ]
+        last_error = None
+        for model in FALLBACK_MODELS:
+            try:
+                chat = self._get_chat(user_id, model)
+                response = chat.send_message(prompt)
+                return response.text or "✅ Voice note processed and executed in Notion."
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Model {model} failed for voice: {e}. Retrying with next model...")
+                continue
+
+        logger.error(f"All fallback models failed for voice: {last_error}", exc_info=True)
+        return "⚠️ *Sorry, I could not process that voice note due to high demand.* Please try again or send as a text message."
 
 gemini_agent = GeminiNotionAgent()
