@@ -1,0 +1,12 @@
+.env
+.env.local
+.env.*.local
+__pycache__/
+*.py[cod]
+*.class
+*.log
+.pytest_cache/
+scan_secrets.py
+test_connections.py
+test_telegram.py
+.system_generated/
