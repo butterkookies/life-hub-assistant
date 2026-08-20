@@ -115,68 +115,86 @@ TOOLS = [
     create_new_page
 ]
 
-FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-flash-latest"]
+MODEL_TIERS = [
+    {"model": "gemini-3.7-flash", "display": "Gemini 3.7 Flash", "thinking": True},
+    {"model": "gemini-3.6-flash", "display": "Gemini 3.6 Flash", "thinking": False},
+    {"model": "gemini-2.5-flash", "display": "Gemini 2.5 Flash", "thinking": False},
+    {"model": "gemini-flash-latest", "display": "Gemini Flash Latest", "thinking": False},
+]
 
 class GeminiNotionAgent:
     def __init__(self):
         self.api_key = settings.GEMINI_API_KEY
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
-        self.chats: Dict[str, Any] = {}
+        self.histories: Dict[str, List[Any]] = {}
 
     def _ensure_client(self):
         if not self.client:
             self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
-    def _get_chat(self, user_id: str, model_name: str = "gemini-2.5-flash"):
-        self._ensure_client()
-        chat_key = f"{user_id}_{model_name}"
-        if chat_key not in self.chats:
-            config = types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                tools=TOOLS,
-                temperature=0.7
-            )
-            self.chats[chat_key] = self.client.chats.create(
-                model=model_name,
-                config=config
-            )
-        return self.chats[chat_key]
+    def _build_config(self, enable_thinking: bool = False) -> types.GenerateContentConfig:
+        thinking_cfg = types.ThinkingConfig(thinking_budget=-1) if enable_thinking else None
+        return types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            tools=TOOLS,
+            temperature=0.7,
+            thinking_config=thinking_cfg
+        )
 
-    def process_text_message(self, user_id: str, message_text: str) -> str:
-        """Process a text message from Telegram with automatic model fallback."""
+    def _execute_turn(self, user_id: str, prompt_content: Any) -> str:
+        """Execute a prompt turn across tiered models with unified rolling conversation history."""
+        self._ensure_client()
+        user_history = self.histories.get(user_id, [])
         last_error = None
-        for model in FALLBACK_MODELS:
+
+        for tier_index, tier in enumerate(MODEL_TIERS):
+            model_id = tier["model"]
+            model_display = tier["display"]
+            enable_thinking = tier["thinking"]
+
             try:
-                chat = self._get_chat(user_id, model)
-                response = chat.send_message(message_text)
-                return response.text or "✅ Action completed in your Notion workspace."
+                config = self._build_config(enable_thinking=enable_thinking)
+                chat = self.client.chats.create(
+                    model=model_id,
+                    config=config,
+                    history=list(user_history)
+                )
+
+                response = chat.send_message(prompt_content)
+                
+                # Persist rolling conversation history (keep last 20 turns)
+                try:
+                    self.histories[user_id] = chat.get_history()[-20:]
+                except Exception:
+                    pass
+
+                reply_text = response.text or "✅ Action completed in your Notion workspace."
+                
+                # Append discreet notification tag if served by a fallback model
+                if tier_index > 0:
+                    reply_text += f"\n\n_⚡ Handled via {model_display} fallback_"
+
+                return reply_text
+
             except Exception as e:
                 last_error = e
-                logger.warning(f"Model {model} failed: {e}. Retrying with next model fallback...")
+                logger.warning(f"Tier {model_display} ({model_id}) unavailable: {e}. Stepping down to next tier...")
                 continue
 
-        logger.error(f"All fallback models failed: {last_error}", exc_info=True)
+        logger.error(f"All model tiers failed for user {user_id}: {last_error}", exc_info=True)
         return "⚠️ *Sorry, the AI service is experiencing a temporary spike.* Please try again in a few seconds."
 
+    def process_text_message(self, user_id: str, message_text: str) -> str:
+        """Process a text message from Telegram with tiered model fallback."""
+        return self._execute_turn(user_id, message_text)
+
     def process_voice_message(self, user_id: str, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
-        """Process a voice note audio from Telegram with automatic model fallback."""
+        """Process a voice note audio from Telegram with tiered model fallback."""
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
         prompt = [
             audio_part,
             "Please listen to this voice note and execute any Notion task, note, query, or scheduling instructions requested by Andrei."
         ]
-        last_error = None
-        for model in FALLBACK_MODELS:
-            try:
-                chat = self._get_chat(user_id, model)
-                response = chat.send_message(prompt)
-                return response.text or "✅ Voice note processed and executed in Notion."
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Model {model} failed for voice: {e}. Retrying with next model...")
-                continue
-
-        logger.error(f"All fallback models failed for voice: {last_error}", exc_info=True)
-        return "⚠️ *Sorry, I could not process that voice note due to high demand.* Please try again or send as a text message."
+        return self._execute_turn(user_id, prompt)
 
 gemini_agent = GeminiNotionAgent()
