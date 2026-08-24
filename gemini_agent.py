@@ -131,10 +131,10 @@ TOOLS = [
 ]
 
 MODEL_TIERS = [
-    {"model": "gemini-3.7-flash", "display": "Gemini 3.7 Flash", "thinking": True},
-    {"model": "gemini-3.6-flash", "display": "Gemini 3.6 Flash", "thinking": False},
     {"model": "gemini-2.5-flash", "display": "Gemini 2.5 Flash", "thinking": False},
     {"model": "gemini-flash-latest", "display": "Gemini Flash Latest", "thinking": False},
+    {"model": "gemini-3.7-flash", "display": "Gemini 3.7 Flash", "thinking": False},
+    {"model": "gemini-2.5-pro", "display": "Gemini 2.5 Pro", "thinking": False},
 ]
 
 class GeminiNotionAgent:

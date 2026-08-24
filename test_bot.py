@@ -1,6 +1,10 @@
-﻿import sys
+import sys
 import os
 from dotenv import load_dotenv
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
 
 load_dotenv()
 

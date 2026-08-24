@@ -170,11 +170,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pages = notion_service.search_workspace(query="", filter_type="page")
         status_text = (
             "✅ *System Status: ALL SYSTEMS OPERATIONAL*\n\n"
-            "• 🤖 *AI Engine:* Google Gemini 3.7 Flash (Adaptive Thinking)\n"
+            "• 🤖 *AI Engine:* Google Gemini (High-Speed & Multi-Tier Fallback)\n"
             f"• 🗄️ *Notion Status:* Connected ({len(pages)} accessible pages found)\n"
             f"• 👤 *Authorized User ID:* `{update.effective_user.id}`\n"
             "• 🎙️ *Voice Note Processing:* Active\n"
-            "• ⚡ *Failover Fallback:* Gemini 3.6 Flash / 2.5 Flash"
+            "• ⚡ *Active Tiers:* Gemini 2.5 Flash / Flash Latest / 3.7 Flash / 2.5 Pro"
         )
     except Exception as e:
         status_text = f"⚠️ *Notion Connection Error:* {str(e)}"
