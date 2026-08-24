@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 
 if sys.platform == "win32":
@@ -207,13 +207,41 @@ class GeminiNotionAgent:
 
     def process_voice_message(self, user_id: str, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
         """Process a voice note audio from Telegram with live date context and tiered model fallback."""
-        now_str = datetime.now().strftime('%A, %B %d, %Y %I:%M %p')
+        tz = timezone(timedelta(hours=settings.UTC_OFFSET_HOURS))
+        now_str = datetime.now(tz).strftime('%A, %B %d, %Y %I:%M %p')
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
         prompt = [
             audio_part,
             f"[Context: Current Date & Time is {now_str} (Asia/Manila, UTC+8)]\n"
             "Please listen to this voice note and execute any Notion task, schedule, note, query, or calendar instructions requested by Andrei."
         ]
+        return self._execute_turn(user_id, prompt)
+
+    def generate_daily_briefing(self, user_id: str = "briefing", target_date: str = "") -> str:
+        """Generate a structured, motivating morning briefing based on today's Notion schedule, tasks, and goals."""
+        tz = timezone(timedelta(hours=settings.UTC_OFFSET_HOURS))
+        now_tz = datetime.now(tz)
+        target = target_date.strip() if target_date and target_date.strip() else now_tz.strftime("%Y-%m-%d")
+        date_display = now_tz.strftime("%A, %B %d, %Y")
+
+        try:
+            schedule_items = notion_service.get_calendar_schedule(target_date=target)
+        except Exception as e:
+            logger.warning(f"Error fetching schedule for briefing: {e}")
+            schedule_items = []
+
+        prompt = (
+            f"[Context: Morning Briefing for {date_display} (Asia/Manila, UTC+8)]\n\n"
+            f"You are Andrei's personal executive AI assistant delivering his automated morning briefing.\n"
+            f"Here is his Notion Calendar schedule, tasks, and deadlines for today ({target}):\n"
+            f"```json\n{json.dumps(schedule_items, indent=2)}\n```\n\n"
+            "Create a warm, crisp, and motivating morning briefing with the following structure:\n"
+            "1. ☀️ **Morning Greeting & Date**: Warm, energetic opening with today's day and date.\n"
+            "2. 📋 **Today's Priorities & Schedule**: Bulleted breakdown of today's scheduled tasks, classes/events, and deadlines (clearly noting status/priority). If the schedule is completely clear, highlight that he has a clean slate and encourage focus on high-impact projects or study.\n"
+            "3. 🏃 **Health & Fitness Prompt**: A quick reminder to get a workout in (e.g. TRAX treadmill walk/run) and log his daily health check-in in the Life Hub.\n"
+            "4. ⚡ **Daily Motivation**: A short, punchy thought or reminder for the day.\n\n"
+            "Format cleanly for Telegram with emojis, bold headers, and crisp bullet points. Keep it engaging, scannable, and under 250 words."
+        )
         return self._execute_turn(user_id, prompt)
 
 gemini_agent = GeminiNotionAgent()

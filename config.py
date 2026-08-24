@@ -43,6 +43,24 @@ class Settings:
         load_dotenv(override=True)
         return os.getenv("WEBHOOK_URL", "").strip()
 
+    @property
+    def DAILY_BRIEFING_ENABLED(self) -> bool:
+        load_dotenv(override=True)
+        return os.getenv("DAILY_BRIEFING_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+
+    @property
+    def DAILY_BRIEFING_TIME(self) -> str:
+        load_dotenv(override=True)
+        return os.getenv("DAILY_BRIEFING_TIME", "06:00").strip()
+
+    @property
+    def UTC_OFFSET_HOURS(self) -> float:
+        load_dotenv(override=True)
+        try:
+            return float(os.getenv("UTC_OFFSET_HOURS", "8"))
+        except ValueError:
+            return 8.0
+
     def is_authorized(self, user_id: int) -> bool:
         allowed = self.ALLOWED_TELEGRAM_USER_IDS
         if not allowed:
