@@ -213,7 +213,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• 🗄️ *Notion Status:* Connected ({len(pages)} accessible pages found)\n"
             f"• 👤 *Authorized User ID:* `{update.effective_user.id}`\n"
             "• 🎙️ *Voice Note Processing:* Active\n"
-            "• ⚡ *Active Tiers:* Gemini 2.5 Flash / Flash Latest / 3.7 Flash / 2.5 Pro"
+            "• ⚡ *Active Tiers:* Gemini 3.5 Flash Lite / 3.1 Flash Lite / Flash Lite Latest / 3 Flash / 3.7 Flash"
         )
     except Exception as e:
         status_text = f"⚠️ *Notion Connection Error:* {str(e)}"

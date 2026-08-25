@@ -131,10 +131,12 @@ TOOLS = [
 ]
 
 MODEL_TIERS = [
-    {"model": "gemini-2.5-flash", "display": "Gemini 2.5 Flash", "thinking": False},
-    {"model": "gemini-flash-latest", "display": "Gemini Flash Latest", "thinking": False},
+    {"model": "gemini-3.5-flash-lite", "display": "Gemini 3.5 Flash Lite", "thinking": False},
+    {"model": "gemini-3.1-flash-lite-preview", "display": "Gemini 3.1 Flash Lite", "thinking": False},
+    {"model": "gemini-flash-lite-latest", "display": "Gemini Flash Lite Latest", "thinking": False},
+    {"model": "gemini-3-flash-preview", "display": "Gemini 3 Flash", "thinking": False},
     {"model": "gemini-3.7-flash", "display": "Gemini 3.7 Flash", "thinking": False},
-    {"model": "gemini-2.5-pro", "display": "Gemini 2.5 Pro", "thinking": False},
+    {"model": "gemini-2.5-flash", "display": "Gemini 2.5 Flash", "thinking": False},
 ]
 
 class GeminiNotionAgent:
@@ -194,6 +196,10 @@ class GeminiNotionAgent:
             except Exception as e:
                 last_error = e
                 logger.warning(f"Tier {model_display} ({model_id}) unavailable: {e}. Stepping down to next tier...")
+                # If history caused a 400 bad request, clear history for this user
+                if "400" in str(e) or "history" in str(e).lower():
+                    self.histories[user_id] = []
+                    user_history = []
                 continue
 
         logger.error(f"All model tiers failed for user {user_id}: {last_error}", exc_info=True)
