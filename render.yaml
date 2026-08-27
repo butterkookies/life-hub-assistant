@@ -28,7 +28,9 @@ services:
         value: Andrei's Notion AI Assistant
       - key: DAILY_BRIEFING_TIME
         value: "06:00"
-      - key: UTC_OFFSET_HOURS
-        value: "8"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        value: onboarding@resend.dev
       - key: PORT
         value: 10000
