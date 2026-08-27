@@ -25,6 +25,7 @@ from telegram.ext import (
 from config import settings
 from gemini_agent import gemini_agent
 from notion_service import notion_service
+from email_service import email_service
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -131,6 +132,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I am connected to your *Life Hub* workspace and ready to help you manage your projects, tasks, schedule, and daily health from your phone.\n\n"
         "✨ *Things you can do:*\n"
         "• 🌅 *Daily Morning Briefing:* Type /briefing anytime, or receive it automatically every morning at 6:00 AM.\n"
+        "• 📧 *Email Notifications:* Morning briefings and alerts can be sent directly to your inbox. (Use /email for details)\n"
         "• 💬 *Text me:* _'What are my high priority tasks for BSIT-31A?'_\n"
         "• 📅 *Check Schedule:* _'Scan my calendar and schedule for today'_\n"
         "• 🎙️ *Send a Voice Note:* Hold the mic button and tell me what tasks or notes to record.\n"
@@ -138,7 +140,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 🏃 *Track Fitness:* _'Log 40min treadmill walk: 2.91 km, 4006 steps, 203 cal'_\n"
         "• 🔍 *Search Workspace:* _'Find notes on Cianotes App'_\n"
         "• ✍️ *Append Notes:* _'Add bullet point to my Daily Journal: Completed project setup today'_\n\n"
-        "Use /help to see more examples or /status to check connections."
+        "Use /help to see more examples, /email for email alerts, or /status to check connections."
     )
     await send_clean_reply(update.message, welcome_text)
 
@@ -149,9 +151,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     help_text = (
         "💡 *Notion AI Assistant Help & Examples*\n\n"
-        "🌅 *Morning Briefing:*\n"
+        "🌅 *Morning Briefing & Email:*\n"
         "• `/briefing` or `/briefing now` — Receive today's schedule briefing immediately\n"
-        "• `/briefing status` — View your morning briefing schedule status\n\n"
+        "• `/briefing email` — Send today's briefing to your email inbox\n"
+        "• `/briefing status` — View your morning briefing schedule settings\n"
+        "• `/email status` — Check email notification configuration\n"
+        "• `/email test` — Send a test email to verify delivery\n\n"
         "📋 *Tasks & Schedule:*\n"
         "• _'Scan my calendar schedule for today'_\n"
         "• _'List all active projects in my Life Hub'_\n"
@@ -179,13 +184,17 @@ async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if args and args[0].lower() in ("status", "info"):
         tz = timezone(timedelta(hours=settings.UTC_OFFSET_HOURS))
         current_time_str = datetime.now(tz).strftime("%I:%M %p")
+        email_status_str = "🟢 Enabled" if (settings.EMAIL_NOTIFICATIONS_ENABLED and email_service.is_configured()) else ("🟡 Configured (Pending credentials)" if settings.NOTIFICATION_EMAIL_TO else "⚪ Disabled")
         status_msg = (
             "🌅 <b>Daily Morning Briefing Settings</b>\n\n"
             f"• <b>Status:</b> {'🟢 Active (Sending daily)' if settings.DAILY_BRIEFING_ENABLED else '🔴 Paused'}\n"
             f"• <b>Scheduled Time:</b> <code>{settings.DAILY_BRIEFING_TIME}</code> (Asia/Manila, UTC+8)\n"
-            f"• <b>Current Local Time:</b> <code>{current_time_str}</code>\n\n"
+            f"• <b>Current Local Time:</b> <code>{current_time_str}</code>\n"
+            f"• <b>Email Notification:</b> {email_status_str}\n"
+            f"• <b>Recipient Email:</b> <code>{settings.NOTIFICATION_EMAIL_TO or 'Not set'}</code>\n\n"
             "<b>Usage:</b>\n"
-            "• <code>/briefing</code> or <code>/briefing now</code> — Generate today's briefing immediately."
+            "• <code>/briefing</code> or <code>/briefing now</code> — Generate today's briefing immediately.\n"
+            "• <code>/briefing email</code> — Generate briefing and send directly to your email."
         )
         await send_clean_reply(update.message, status_msg)
         return
@@ -197,7 +206,85 @@ async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         gemini_agent.generate_daily_briefing,
         user_id
     )
-    await send_clean_reply(update.message, briefing_text)
+
+    # Check if user specifically requested email or if email is configured
+    want_email = bool(args and "email" in [a.lower() for a in args])
+    email_note = ""
+    if (want_email or settings.EMAIL_NOTIFICATIONS_ENABLED) and email_service.is_configured():
+        email_success, email_res = await loop.run_in_executor(
+            None,
+            email_service.send_briefing_email,
+            briefing_text
+        )
+        if email_success:
+            email_note = f"\n\n📧 <i>Also delivered to <code>{settings.NOTIFICATION_EMAIL_TO}</code></i>"
+        elif want_email:
+            email_note = f"\n\n⚠️ <i>Email delivery note: {email_res}</i>"
+
+    await send_clean_reply(update.message, briefing_text + email_note)
+
+async def email_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /email command for managing and testing email notifications."""
+    if not await check_auth(update):
+        return
+
+    user_id = str(update.effective_user.id)
+    args = context.args or []
+    action = args[0].lower() if args else "status"
+
+    if action in ("status", "info"):
+        is_conf = email_service.is_configured()
+        recipient = settings.NOTIFICATION_EMAIL_TO or "Not set in .env"
+        provider = "Resend API" if settings.RESEND_API_KEY else (f"SMTP ({settings.SMTP_HOST}:{settings.SMTP_PORT})" if settings.SMTP_USER else "None configured")
+        
+        status_msg = (
+            "📧 <b>Email Notification Settings</b>\n\n"
+            f"• <b>Status:</b> {'🟢 Active & Ready' if is_conf else '🔴 Inactive (Credentials needed)'}\n"
+            f"• <b>Recipient:</b> <code>{recipient}</code>\n"
+            f"• <b>Provider:</b> <code>{provider}</code>\n"
+            f"• <b>Sender Name:</b> <code>{settings.EMAIL_FROM_NAME}</code>\n"
+            f"• <b>Scheduled 6:00 AM Email:</b> {'✅ Enabled' if settings.EMAIL_NOTIFICATIONS_ENABLED else '❌ Disabled'}\n\n"
+            "<b>Commands:</b>\n"
+            "• <code>/email test</code> — Send a test notification email\n"
+            "• <code>/briefing email</code> — Deliver today's briefing to your email inbox immediately"
+        )
+        await send_clean_reply(update.message, status_msg)
+        return
+
+    if action == "test":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+        loop = asyncio.get_running_loop()
+        success, res_msg = await loop.run_in_executor(
+            None,
+            email_service.send_notification_email,
+            "Test Notification from Notion AI Bot",
+            "This is a test notification confirming that your email dispatch is working perfectly with your Telegram Notion AI Bot!"
+        )
+        if success:
+            await send_clean_reply(update.message, f"✅ <b>Email Sent Successfully!</b>\n{res_msg}\n\nCheck your inbox at <code>{settings.NOTIFICATION_EMAIL_TO}</code>.")
+        else:
+            await send_clean_reply(update.message, f"⚠️ <b>Email Dispatch Failed:</b>\n{res_msg}\n\nPlease check your <code>NOTIFICATION_EMAIL_TO</code> and <code>SMTP_USER/SMTP_PASSWORD</code> in your environment variables.")
+        return
+
+    if action in ("send", "now"):
+        # Trigger on-demand briefing to email
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+        loop = asyncio.get_running_loop()
+        briefing_text = await loop.run_in_executor(
+            None,
+            gemini_agent.generate_daily_briefing,
+            user_id
+        )
+        success, res_msg = await loop.run_in_executor(
+            None,
+            email_service.send_briefing_email,
+            briefing_text
+        )
+        if success:
+            await send_clean_reply(update.message, f"✅ <b>Daily Briefing Sent to Email!</b>\nDelivered to <code>{settings.NOTIFICATION_EMAIL_TO}</code>.")
+        else:
+            await send_clean_reply(update.message, f"⚠️ <b>Could not send email:</b>\n{res_msg}")
+        return
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command."""
@@ -207,11 +294,13 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
     try:
         pages = notion_service.search_workspace(query="", filter_type="page")
+        email_badge = "🟢 Active" if email_service.is_configured() else "⚪ Optional (Not set)"
         status_text = (
             "✅ *System Status: ALL SYSTEMS OPERATIONAL*\n\n"
             "• 🤖 *AI Engine:* Google Gemini (High-Speed & Multi-Tier Fallback)\n"
             f"• 🗄️ *Notion Status:* Connected ({len(pages)} accessible pages found)\n"
             f"• 👤 *Authorized User ID:* `{update.effective_user.id}`\n"
+            f"• 📧 *Email Notifications:* {email_badge}\n"
             "• 🎙️ *Voice Note Processing:* Active\n"
             "• ⚡ *Active Tiers:* Gemini 3.5 Flash Lite / 3.1 Flash Lite / Flash Lite Latest / 3 Flash / 3.7 Flash"
         )
@@ -341,6 +430,19 @@ async def daily_briefing_scheduler(app: Application):
                             disable_web_page_preview=True
                         )
                         logger.info(f"Morning briefing delivered to user ID {user_id}")
+
+                        # Dispatch morning briefing to email
+                        if email_service.is_configured():
+                            try:
+                                em_ok, em_msg = await loop.run_in_executor(
+                                    None,
+                                    email_service.send_briefing_email,
+                                    briefing_text
+                                )
+                                logger.info(f"Morning briefing email dispatch result: {em_msg}")
+                            except Exception as em_err:
+                                logger.error(f"Failed delivering morning briefing email: {em_err}")
+
                     except Exception as err:
                         logger.error(f"Failed delivering morning briefing to user {user_id}: {err}")
             
@@ -383,6 +485,7 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("briefing", briefing_command))
+    app.add_handler(CommandHandler("email", email_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
 

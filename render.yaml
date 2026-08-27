@@ -1,4 +1,4 @@
-﻿services:
+services:
   - type: web
     name: notion-telegram-ai-bot
     env: python
@@ -14,5 +14,21 @@
         sync: false
       - key: NOTION_API_KEY
         sync: false
+      - key: NOTIFICATION_EMAIL_TO
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: EMAIL_FROM_NAME
+        value: Andrei's Notion AI Assistant
+      - key: DAILY_BRIEFING_TIME
+        value: "06:00"
+      - key: UTC_OFFSET_HOURS
+        value: "8"
       - key: PORT
         value: 10000

@@ -61,6 +61,61 @@ class Settings:
         except ValueError:
             return 8.0
 
+    @property
+    def EMAIL_NOTIFICATIONS_ENABLED(self) -> bool:
+        load_dotenv(override=True)
+        raw = os.getenv("EMAIL_NOTIFICATIONS_ENABLED", "").strip().lower()
+        if raw in ("false", "0", "no"):
+            return False
+        # Enabled by default if recipient email and credentials exist, or explicitly set to true
+        return raw in ("true", "1", "yes") or bool(self.NOTIFICATION_EMAIL_TO and (self.SMTP_USER or self.RESEND_API_KEY))
+
+    @property
+    def NOTIFICATION_EMAIL_TO(self) -> str:
+        load_dotenv(override=True)
+        return os.getenv("NOTIFICATION_EMAIL_TO", "").strip()
+
+    @property
+    def SMTP_HOST(self) -> str:
+        load_dotenv(override=True)
+        return os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+
+    @property
+    def SMTP_PORT(self) -> int:
+        load_dotenv(override=True)
+        try:
+            return int(os.getenv("SMTP_PORT", "587"))
+        except ValueError:
+            return 587
+
+    @property
+    def SMTP_USER(self) -> str:
+        load_dotenv(override=True)
+        return os.getenv("SMTP_USER", "").strip()
+
+    @property
+    def SMTP_PASSWORD(self) -> str:
+        load_dotenv(override=True)
+        return os.getenv("SMTP_PASSWORD", "").strip()
+
+    @property
+    def EMAIL_FROM_NAME(self) -> str:
+        load_dotenv(override=True)
+        return os.getenv("EMAIL_FROM_NAME", "Andrei's Notion AI Assistant").strip()
+
+    @property
+    def EMAIL_FROM_ADDRESS(self) -> str:
+        load_dotenv(override=True)
+        from_addr = os.getenv("EMAIL_FROM_ADDRESS", "").strip()
+        if from_addr:
+            return from_addr
+        return self.SMTP_USER or "briefing@notion-assistant.app"
+
+    @property
+    def RESEND_API_KEY(self) -> str:
+        load_dotenv(override=True)
+        return os.getenv("RESEND_API_KEY", "").strip()
+
     def is_authorized(self, user_id: int) -> bool:
         allowed = self.ALLOWED_TELEGRAM_USER_IDS
         if not allowed:
