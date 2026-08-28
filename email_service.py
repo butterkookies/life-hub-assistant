@@ -222,7 +222,8 @@ class EmailService:
         url = "https://api.resend.com/emails"
         headers = {
             "Authorization": f"Bearer {settings.RESEND_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "User-Agent": "NotionAIBot/1.0"
         }
         payload = {
             "from": f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM_ADDRESS}>",
@@ -240,9 +241,14 @@ class EmailService:
                 return True, f"Email delivered via Resend (ID: {data.get('id')})"
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8")
-            err_msg = f"Resend API Error ({e.code}): {err_body}"
-            logger.error(err_msg)
-            return False, err_msg
+            try:
+                err_json = json.loads(err_body)
+                err_msg = err_json.get("message", err_body)
+            except Exception:
+                err_msg = err_body
+            formatted_err = f"Resend API Error ({e.code}): {err_msg}"
+            logger.error(formatted_err)
+            return False, formatted_err
         except Exception as e:
             err_msg = f"Resend HTTP request failed: {str(e)}"
             logger.error(err_msg)
@@ -252,16 +258,19 @@ class EmailService:
         """Dispatch email using configured SMTP or Resend provider with graceful fallback."""
         recipient = (to_email or settings.NOTIFICATION_EMAIL_TO).strip()
         if not recipient:
-            return False, "No recipient email configured. Please set NOTIFICATION_EMAIL_TO in .env."
+            return False, "No recipient email configured. Please set NOTIFICATION_EMAIL_TO."
 
         # 1. Try Resend if configured
         if settings.RESEND_API_KEY:
             success, msg = self._send_via_resend(recipient, subject, html_body, plain_body)
             if success:
                 return True, msg
+            # If Resend failed and SMTP is NOT configured, return Resend's exact error
+            if not (settings.SMTP_USER and settings.SMTP_PASSWORD):
+                return False, msg
             logger.warning(f"Resend delivery failed ({msg}), attempting SMTP fallback...")
 
-        # 2. Try SMTP
+        # 2. Try SMTP if configured
         if settings.SMTP_USER and settings.SMTP_PASSWORD:
             return self._send_via_smtp(recipient, subject, html_body, plain_body)
 

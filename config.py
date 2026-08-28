@@ -7,22 +7,22 @@ load_dotenv()
 class Settings:
     @property
     def TELEGRAM_BOT_TOKEN(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 
     @property
     def GEMINI_API_KEY(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("GEMINI_API_KEY", "").strip()
 
     @property
     def NOTION_API_KEY(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("NOTION_API_KEY", "").strip()
         
     @property
     def ALLOWED_TELEGRAM_USER_IDS(self) -> List[int]:
-        load_dotenv(override=True)
+        load_dotenv()
         raw = os.getenv("ALLOWED_TELEGRAM_USER_IDS", "").strip()
         if not raw:
             return []
@@ -35,27 +35,27 @@ class Settings:
 
     @property
     def PORT(self) -> int:
-        load_dotenv(override=True)
+        load_dotenv()
         return int(os.getenv("PORT", "8000"))
 
     @property
     def WEBHOOK_URL(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("WEBHOOK_URL", "").strip()
 
     @property
     def DAILY_BRIEFING_ENABLED(self) -> bool:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("DAILY_BRIEFING_ENABLED", "true").strip().lower() in ("true", "1", "yes")
 
     @property
     def DAILY_BRIEFING_TIME(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("DAILY_BRIEFING_TIME", "06:00").strip()
 
     @property
     def UTC_OFFSET_HOURS(self) -> float:
-        load_dotenv(override=True)
+        load_dotenv()
         try:
             return float(os.getenv("UTC_OFFSET_HOURS", "8"))
         except ValueError:
@@ -63,7 +63,7 @@ class Settings:
 
     @property
     def EMAIL_NOTIFICATIONS_ENABLED(self) -> bool:
-        load_dotenv(override=True)
+        load_dotenv()
         raw = os.getenv("EMAIL_NOTIFICATIONS_ENABLED", "").strip().lower()
         if raw in ("false", "0", "no"):
             return False
@@ -72,17 +72,17 @@ class Settings:
 
     @property
     def NOTIFICATION_EMAIL_TO(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("NOTIFICATION_EMAIL_TO", "").strip()
 
     @property
     def SMTP_HOST(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
 
     @property
     def SMTP_PORT(self) -> int:
-        load_dotenv(override=True)
+        load_dotenv()
         try:
             return int(os.getenv("SMTP_PORT", "587"))
         except ValueError:
@@ -90,22 +90,22 @@ class Settings:
 
     @property
     def SMTP_USER(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("SMTP_USER", "").strip()
 
     @property
     def SMTP_PASSWORD(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("SMTP_PASSWORD", "").strip()
 
     @property
     def EMAIL_FROM_NAME(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("EMAIL_FROM_NAME", "Andrei's Notion AI Assistant").strip()
 
     @property
     def EMAIL_FROM_ADDRESS(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         from_addr = os.getenv("EMAIL_FROM_ADDRESS", "").strip()
         if from_addr:
             return from_addr
@@ -113,7 +113,7 @@ class Settings:
 
     @property
     def RESEND_API_KEY(self) -> str:
-        load_dotenv(override=True)
+        load_dotenv()
         return os.getenv("RESEND_API_KEY", "").strip()
 
     def is_authorized(self, user_id: int) -> bool:
