@@ -37,7 +37,7 @@ import html
 import re
 
 def format_for_telegram(text: str) -> str:
-    """Convert AI markdown output into clean, reliable, and beautifully rendered Telegram HTML."""
+    """Convert AI markdown output into clean, curated, and beautifully rendered Telegram HTML."""
     if not text:
         return ""
     
@@ -57,8 +57,8 @@ def format_for_telegram(text: str) -> str:
     
     formatted = re.sub(r'`([^`]+)`', save_ic, formatted)
     
-    # 3. Escape raw HTML entities
-    formatted = html.escape(formatted)
+    # 3. Escape ONLY <, >, & (do NOT escape quotes/apostrophes to avoid &#x27; and &quot; artifacts)
+    formatted = html.escape(formatted, quote=False)
     
     # 4. Convert Markdown Headings (###, ##, #) to bold header lines
     formatted = re.sub(r'^[ \t]*#{1,6}[ \t]+(.*)$', r'<b>\1</b>', formatted, flags=re.MULTILINE)
@@ -78,21 +78,25 @@ def format_for_telegram(text: str) -> str:
     formatted = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', formatted)
     formatted = re.sub(r'__(.+?)__', r'<b>\1</b>', formatted)
     
-    # 8. Convert single star *text* -> <b>text</b>
-    formatted = re.sub(r'(?<!\w)\*([^*\n]+?)\*(?!\w)', r'<b>\1</b>', formatted)
+    # 8. Convert parenthetical italic notes *(_text_)* or *(text)*
+    formatted = re.sub(r'\*\(_(.+?)_\)\*', r'<i>(\1)</i>', formatted)
+    formatted = re.sub(r'\*\((.+?)\)\*', r'<i>(\1)</i>', formatted)
     
     # 9. Convert single underscore _text_ -> <i>text</i>
     formatted = re.sub(r'(?<!\w)_([^_\n]+?)_(?!\w)', r'<i>\1</i>', formatted)
     
-    # 10. Clean bullet points: `* ` or `- ` at line start -> `• `
+    # 10. Convert single star *text* -> <b>text</b> (when not at bullet start)
+    formatted = re.sub(r'(?<!^)(?<!\n)(?<!\w)\*([^*\n]+?)\*(?!\w)', r'<b>\1</b>', formatted)
+    
+    # 11. Clean bullet points: `* ` or `- ` at line start -> `• `
     formatted = re.sub(r'^[ \t]*[\*\-][ \t]+', '• ', formatted, flags=re.MULTILINE)
     
-    # 11. Restore inline code and code blocks
+    # 12. Restore inline code and code blocks
     for i, code in enumerate(inline_codes):
-        formatted = formatted.replace(f"___INLINECODE_{i}___", f"<code>{html.escape(code)}</code>")
+        formatted = formatted.replace(f"___INLINECODE_{i}___", f"<code>{html.escape(code, quote=False)}</code>")
         
     for i, code in enumerate(code_blocks):
-        formatted = formatted.replace(f"___CODEBLOCK_{i}___", f"<pre>{html.escape(code)}</pre>")
+        formatted = formatted.replace(f"___CODEBLOCK_{i}___", f"<pre>{html.escape(code, quote=False)}</pre>")
         
     return formatted
 
