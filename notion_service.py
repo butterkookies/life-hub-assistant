@@ -1,12 +1,28 @@
 import json
 import logging
+import math
+from datetime import date
 from typing import Dict, Any, List, Optional
 from notion_client import Client
 from config import settings
+from image_models import AttachmentResult, TreadmillScan, WorkoutUpsertResult
 
 logger = logging.getLogger("notion_service")
 
 class NotionService:
+    HEALTH_LOG_DATABASE_ID = "3c327102528781669c3cc7d7acfaa2a4"
+    HEALTH_LOG_DATA_SOURCE_ID = "3c327102528781ab8777000b115b3f54"
+    WORKOUT_PROPERTY_MAP = {
+        "duration_minutes": "Duration (min)",
+        "distance_km": "Distance (km)",
+        "steps": "Treadmill Steps",
+        "calories_kcal": "Workout Calories",
+        "speed_kmh": "Speed (km/h)",
+        "heart_rate_bpm": "Pulse / HR (bpm)",
+        "trax_program": "TRAX Program",
+        "workout_type": "Workout Type",
+    }
+
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.NOTION_API_KEY
         self.client = Client(auth=self.api_key) if self.api_key else None
@@ -128,7 +144,198 @@ class NotionService:
         "51127102528782ed8a80816bc58e66a1": "97227102528782ad81b707fb6d42c4d5", # Workstreams
         "2f37a332d3d2412eb52130f52c279318": "d4e6043c84e045d2a63b45ad038819f7", # Notes
         "ea7c1cc69135485fbe4d0f7fd4947a00": "6e61a09d80e94e5ba56d0f94772cc1f1", # Thought Inbox
+        HEALTH_LOG_DATABASE_ID: HEALTH_LOG_DATA_SOURCE_ID, # Daily Health & Workout Log
     }
+
+    @staticmethod
+    def _notion_property_value(prop: Dict[str, Any]) -> Any:
+        prop_type = prop.get("type")
+        value = prop.get(prop_type) if prop_type else None
+        if prop_type == "select":
+            return value.get("name") if value else None
+        if prop_type == "date":
+            return value.get("start") if value else None
+        if prop_type in ("title", "rich_text"):
+            return "".join(item.get("plain_text", "") for item in (value or []))
+        return value
+
+    @staticmethod
+    def _workout_property_payload(attribute: str, value: Any) -> Dict[str, Any]:
+        if attribute in ("trax_program", "workout_type"):
+            return {"select": {"name": value}}
+        return {"number": value}
+
+    @staticmethod
+    def _values_match(existing: Any, incoming: Any) -> bool:
+        if isinstance(existing, (int, float)) and isinstance(incoming, (int, float)):
+            return math.isclose(float(existing), float(incoming), rel_tol=1e-6, abs_tol=1e-6)
+        return existing == incoming
+
+    def upsert_daily_workout(
+        self,
+        scan: TreadmillScan,
+        allow_overwrite: bool = False,
+        expected_conflicts: Optional[Dict[str, tuple[Any, Any]]] = None,
+    ) -> WorkoutUpsertResult:
+        """Create or safely update the single health-log row for a date."""
+        validation_errors = scan.validation_errors()
+        if validation_errors:
+            raise ValueError(
+                "Invalid treadmill scan: " + "; ".join(validation_errors)
+            )
+        self._ensure_client()
+        response = self.client.data_sources.query(
+            data_source_id=self.HEALTH_LOG_DATA_SOURCE_ID,
+            filter={"property": "Date", "date": {"equals": scan.date}},
+            page_size=2,
+        )
+        results = response.get("results", [])
+        incoming = {
+            attribute: getattr(scan, attribute)
+            for attribute in self.WORKOUT_PROPERTY_MAP
+            if getattr(scan, attribute) is not None
+        }
+
+        if not results:
+            properties: Dict[str, Any] = {
+                "Day": {
+                    "title": [
+                        {
+                            "text": {
+                                "content": date.fromisoformat(scan.date).strftime(
+                                    "%b %d, %Y"
+                                )
+                            }
+                        }
+                    ]
+                },
+                "Date": {"date": {"start": scan.date}},
+            }
+            for attribute, value in incoming.items():
+                properties[self.WORKOUT_PROPERTY_MAP[attribute]] = (
+                    self._workout_property_payload(attribute, value)
+                )
+            page = self.client.pages.create(
+                parent={"data_source_id": self.HEALTH_LOG_DATA_SOURCE_ID},
+                properties=properties,
+            )
+            return WorkoutUpsertResult(
+                action="created",
+                page_id=page.get("id", ""),
+                page_url=page.get("url"),
+                written_fields=list(incoming),
+            )
+
+        page = results[0]
+        page_id = page.get("id", "")
+        page_url = page.get("url")
+        existing_properties = page.get("properties", {})
+        updates: Dict[str, Any] = {}
+        written_fields: list[str] = []
+        conflicts: Dict[str, tuple[Any, Any]] = {}
+
+        for attribute, value in incoming.items():
+            property_name = self.WORKOUT_PROPERTY_MAP[attribute]
+            existing = self._notion_property_value(
+                existing_properties.get(property_name, {})
+            )
+            if existing is None or existing == "":
+                updates[property_name] = self._workout_property_payload(attribute, value)
+                written_fields.append(attribute)
+            elif not self._values_match(existing, value):
+                conflicts[attribute] = (existing, value)
+                if allow_overwrite:
+                    updates[property_name] = self._workout_property_payload(attribute, value)
+                    written_fields.append(attribute)
+
+        if allow_overwrite and conflicts and (
+            expected_conflicts is None or conflicts != expected_conflicts
+        ):
+            return WorkoutUpsertResult(
+                action="conflict",
+                page_id=page_id,
+                page_url=page_url,
+                conflicts=conflicts,
+            )
+        if conflicts and not allow_overwrite:
+            return WorkoutUpsertResult(
+                action="conflict",
+                page_id=page_id,
+                page_url=page_url,
+                conflicts=conflicts,
+            )
+        if not updates:
+            return WorkoutUpsertResult(
+                action="duplicate", page_id=page_id, page_url=page_url
+            )
+
+        updated = self.client.pages.update(page_id=page_id, properties=updates)
+        return WorkoutUpsertResult(
+            action="updated",
+            page_id=updated.get("id", page_id),
+            page_url=updated.get("url", page_url),
+            written_fields=written_fields,
+            conflicts=conflicts,
+        )
+
+    def attach_image(
+        self,
+        page_id: str,
+        image_bytes: bytes,
+        mime_type: str,
+        filename: str,
+    ) -> AttachmentResult:
+        """Upload an image to Notion and append it to a daily log page."""
+        self._ensure_client()
+        last_error: Optional[Exception] = None
+        upload_id: Optional[str] = None
+        for _attempt in range(3):
+            try:
+                upload = self.client.file_uploads.create(
+                    mode="single_part", filename=filename, content_type=mime_type
+                )
+                candidate_upload_id = upload["id"]
+                self.client.file_uploads.send(
+                    file_upload_id=candidate_upload_id,
+                    file=(filename, image_bytes, mime_type),
+                )
+                upload_id = candidate_upload_id
+                break
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Notion image attachment attempt failed: %s", type(exc).__name__)
+        if not upload_id:
+            return AttachmentResult(
+                attached=False,
+                error=str(last_error) if last_error else "Unknown attachment error",
+            )
+        try:
+            # Append once. Retrying an ambiguous append timeout can duplicate blocks.
+            self.client.blocks.children.append(
+                block_id=page_id.replace("-", ""),
+                children=[
+                    {
+                        "object": "block",
+                        "type": "image",
+                        "image": {
+                            "type": "file_upload",
+                            "file_upload": {"id": upload_id},
+                        },
+                    }
+                ],
+            )
+            return AttachmentResult(attached=True, file_upload_id=upload_id)
+        except Exception as exc:
+            logger.warning("Notion image block append failed: %s", type(exc).__name__)
+            last_error = exc
+        return AttachmentResult(
+            attached=False,
+            file_upload_id=upload_id,
+            error=str(last_error) if last_error else "Unknown attachment error",
+            # The append may have committed before a response timeout. Retrying could
+            # create a duplicate block, so only known pre-append failures are retryable.
+            retryable=False,
+        )
 
     def query_database(self, database_id: str, filter_json: Optional[Dict] = None, page_size: int = 20) -> List[Dict[str, Any]]:
         """Query items in a Notion database or data source."""
@@ -217,7 +424,6 @@ class NotionService:
                         "properties": props
                     })
             else:
-                # Return all items with a date
                 if do_date:
                     scheduled_items.append({
                         "task": task_name,
@@ -227,6 +433,90 @@ class NotionService:
                         "properties": props
                     })
         return scheduled_items
+
+    def get_projects_map(self) -> Dict[str, str]:
+        """Fetch all projects and map their IDs (both hyphenated and clean) to project names."""
+        self._ensure_client()
+        projects_data = self.query_database("ba427102-5287-82ef-bdce-815b505396a2", page_size=100)
+        proj_map = {}
+        for p in projects_data:
+            p_id = p.get("id", "")
+            clean_id = p_id.replace("-", "")
+            name = p.get("properties", {}).get("Name") or "Untitled Project"
+            if p_id:
+                proj_map[p_id] = name
+            if clean_id:
+                proj_map[clean_id] = name
+        return proj_map
+
+    def get_tasks_for_day(self, target_date: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Retrieve rich tasks for a specific date (YYYY-MM-DD), with mapped project names and priority."""
+        self._ensure_client()
+        tasks = self.query_database("d1527102-5287-8329-9cac-81b9d565b99b", page_size=100)
+        if not tasks:
+            results = self.search_workspace(query="Tasks", filter_type="data_source")
+            if results:
+                tasks = self.query_database(results[0]["id"], page_size=100)
+
+        proj_map = {}
+        try:
+            proj_map = self.get_projects_map()
+        except Exception as e:
+            logger.warning(f"Could not load project map: {e}")
+
+        items = []
+        for task in tasks:
+            props = task.get("properties", {})
+            task_id = task.get("id")
+            task_name = props.get("Name") or "Untitled Task"
+            do_date = props.get("Do Date") or props.get("Date") or props.get("Due Date")
+            status = props.get("Status") or "Not started"
+            priority = props.get("Priority") or "Normal"
+            archive = props.get("Archive", False)
+            if archive:
+                continue
+
+            # Project relation
+            rel_projects = props.get("Projects", [])
+            project_names = []
+            project_id = None
+            if isinstance(rel_projects, list) and rel_projects:
+                project_id = rel_projects[0]
+                for pid in rel_projects:
+                    c_pid = str(pid).replace("-", "")
+                    p_name = proj_map.get(pid) or proj_map.get(c_pid)
+                    if p_name:
+                        project_names.append(p_name)
+
+            main_project_name = project_names[0] if project_names else "Personal"
+
+            if target_date:
+                if do_date and str(do_date).startswith(target_date):
+                    items.append({
+                        "id": task_id,
+                        "name": task_name,
+                        "date": str(do_date),
+                        "status": status,
+                        "priority": priority,
+                        "project_id": project_id,
+                        "project_name": main_project_name,
+                        "url": task.get("url"),
+                        "properties": props
+                    })
+            else:
+                items.append({
+                    "id": task_id,
+                    "name": task_name,
+                    "date": str(do_date) if do_date else None,
+                    "status": status,
+                    "priority": priority,
+                    "project_id": project_id,
+                    "project_name": main_project_name,
+                    "url": task.get("url"),
+                    "properties": props
+                })
+        return items
+
 
     def _normalize_key(self, k: str) -> str:
         key_map = {

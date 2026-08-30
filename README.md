@@ -15,10 +15,13 @@ Send text or record **voice notes** directly from your phone to manage tasks, qu
 ## 🌟 Highlights
 
 - 🎙️ **Native Voice-to-Action**: Send Telegram voice notes from your phone lock screen; Gemini automatically transcribes your speech, extracts the intent, and creates/queries entries in Notion.
+- 📷 **Image-to-Notion Workout Logging**: Send a treadmill display photo; Gemini extracts typed statistics, validates them, safely upserts the daily health record, and attaches the source image for reference.
+- 🪟 **Windows Desktop Home Screen Widget**: A modern, sleek floating or desktop-pinned widget on your Windows PC showing your tasks for the day, live completion progress, instant check-off sync, quick task creation, and system tray integration.
 - 🧠 **Autonomous Function Calling**: Gemini intelligently selects tools to search workspace pages, read full markdown docs, query database filters, or create tasks.
 - 🔒 **Ironclad Privacy & Whitelisting**: Restricted exclusively to your authorized Telegram User ID (`ALLOWED_TELEGRAM_USER_IDS`). Any unauthorized sender receives an immediate 403 access denial.
 - 🛡️ **Anti-Leak Guardrails**: AI system instructions prevent leaking internal environment variables, tokens, or system configurations.
 - ⚡ **$0 Infrastructure**: Runs completely on free tiers (Telegram Bot API + Google AI Studio Free Tier + Notion API).
+
 
 ---
 
@@ -88,6 +91,37 @@ NOTION_API_KEY=ntn_your_notion_integration_secret_here
 ```bash
 python telegram_bot.py
 ```
+
+---
+
+## 🪟 Windows PC Home Screen Desktop Widget (React 19 + Electron + Notion Design)
+
+A native Windows desktop home screen widget built with **React 19, TypeScript, Electron, and Tailwind CSS**, designed pixel-by-pixel following the **Notion DESIGN.md** design system.
+
+### Features
+- 🎨 **Notion Design System**: Warm paper canvas (`#f6f5f4`), pure white cards (`#ffffff`), hairline borders (`#e6e6e6`), layered micro-shadows, tight-tracked Inter typography, Notion blue (`#0075de`), and playful sticker project tags.
+- 📋 **Today's Tasks at a Glance**: Displays all tasks scheduled for today (`Do Date`), categorized with project sticker pills, status indicators, and priority badges.
+- ⚡ **Instant Optimistic Check-off**: Click the status circle to toggle a task (`Done` / `In progress` / `Not started`); updates in Notion in real-time with zero UI lag.
+- 👁️ **Notion Page Mini-Preview**: Click any task or the eye icon to expand a mini-preview drawer showing the page's child blocks and markdown notes.
+- ➕ **Inline Quick Add & Detailed Modal**: Type directly into the `+ New task...` row at the bottom and hit Enter, or click `+` on the header for full project/date selection.
+- 🔍 **Search & Project Filter Chips**: Filter tasks by project stickers or instant search.
+- 📊 **Daily Completion Progress Bar**: Visual progress tracking (e.g. `4 of 8 Completed · 50%`).
+- 📌 **Pin to Desktop or Float**: Easily toggle between Always on Top (floating above windows) and Desktop gadget mode (`Ctrl+Shift+T` global hotkey).
+- 📥 **System Tray Agent**: Minimizes cleanly to the Windows system tray with right-click quick controls.
+- 🚀 **Windows Auto-Startup**: Enable auto-launch on boot via widget settings (`⚙️`).
+
+### How to Launch the Widget
+
+```bash
+# Option 1: Double-click the root launcher script
+start_widget.bat
+
+# Option 2: Run directly from widget/ directory
+cd widget
+npm run start
+```
+
+
 
 ---
 

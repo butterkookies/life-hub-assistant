@@ -10,3 +10,6 @@ scan_secrets.py
 test_connections.py
 test_telegram.py
 .system_generated/
+
+# JavaScript / Electron generated dependencies
+widget/node_modules/

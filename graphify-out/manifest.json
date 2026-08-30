@@ -1,0 +1,207 @@
+{
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\config.py": {
+    "mtime": 1787886013.1177392,
+    "ast_hash": "df2c6923efb7e015ac6b9de6a694f537",
+    "semantic_hash": "df2c6923efb7e015ac6b9de6a694f537"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\email_service.py": {
+    "mtime": 1787886727.6009033,
+    "ast_hash": "606d6bd969a6d287ca454a3a37a4951a",
+    "semantic_hash": "606d6bd969a6d287ca454a3a37a4951a"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\gemini_agent.py": {
+    "mtime": 1787624800.1552222,
+    "ast_hash": "b8e3cb2ed5fc483e9cb7ea492d3dc9d3",
+    "semantic_hash": "b8e3cb2ed5fc483e9cb7ea492d3dc9d3"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\notion_service.py": {
+    "mtime": 1787908378.4543707,
+    "ast_hash": "accea385a0d861eccb7da858b4d85d7c",
+    "semantic_hash": "accea385a0d861eccb7da858b4d85d7c"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\telegram_bot.py": {
+    "mtime": 1787886919.5800927,
+    "ast_hash": "9ad57fc9c83f4e2ad92db7c70061ee5b",
+    "semantic_hash": "9ad57fc9c83f4e2ad92db7c70061ee5b"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\test_bot.py": {
+    "mtime": 1787587827.9744465,
+    "ast_hash": "b9b3fc2067a2c92887ea3978ef258b95",
+    "semantic_hash": "b9b3fc2067a2c92887ea3978ef258b95"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\README.md": {
+    "mtime": 1787915943.497355,
+    "ast_hash": "d9a7e84edca1a26f969d077ebf36e77e",
+    "semantic_hash": "d9a7e84edca1a26f969d077ebf36e77e"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\render.yaml": {
+    "mtime": 1787835711.769676,
+    "ast_hash": "0756d1be7fee676a6c343c9784b52db5",
+    "semantic_hash": "0756d1be7fee676a6c343c9784b52db5"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\requirements.txt": {
+    "mtime": 1787908387.2643888,
+    "ast_hash": "98c0c637523143a3d37d0000237a6000",
+    "semantic_hash": "98c0c637523143a3d37d0000237a6000"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\package.json": {
+    "mtime": 1787912636.8938768,
+    "ast_hash": "ba9ac078e297947e9f528a7c486e432c",
+    "semantic_hash": "ba9ac078e297947e9f528a7c486e432c"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\postcss.config.js": {
+    "mtime": 1787909938.769496,
+    "ast_hash": "ef3ba2a81ba19f8ea5ddf625521e96f0",
+    "semantic_hash": "ef3ba2a81ba19f8ea5ddf625521e96f0"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\tailwind.config.js": {
+    "mtime": 1787909936.6696856,
+    "ast_hash": "bd33d4a354c6fac5dd3adc19b2a3f864",
+    "semantic_hash": "bd33d4a354c6fac5dd3adc19b2a3f864"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\tsconfig.json": {
+    "mtime": 1787909931.44762,
+    "ast_hash": "fa24bffc668f0af75bdf040f1c6db02a",
+    "semantic_hash": "fa24bffc668f0af75bdf040f1c6db02a"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\vite.config.ts": {
+    "mtime": 1787912640.4408996,
+    "ast_hash": "3f15d8b681e0e86af412747e527c703b",
+    "semantic_hash": "3f15d8b681e0e86af412747e527c703b"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\dist-electron\\main.js": {
+    "mtime": 1787915928.5345764,
+    "ast_hash": "465a7f474db3482a7564bff36883f45e",
+    "semantic_hash": "465a7f474db3482a7564bff36883f45e"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\dist-electron\\preload.js": {
+    "mtime": 1787911607.7229078,
+    "ast_hash": "75f352e9d80bd0da5876fe94bcf3a2c1",
+    "semantic_hash": "75f352e9d80bd0da5876fe94bcf3a2c1"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\electron\\main.ts": {
+    "mtime": 1787915658.2851293,
+    "ast_hash": "24a72dbb21482857936053de05c936ce",
+    "semantic_hash": "24a72dbb21482857936053de05c936ce"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\electron\\notion-client.ts": {
+    "mtime": 1787910129.448265,
+    "ast_hash": "92cddd9a49a3889f2e67849813d337ab",
+    "semantic_hash": "92cddd9a49a3889f2e67849813d337ab"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\electron\\preload.ts": {
+    "mtime": 1787909967.046689,
+    "ast_hash": "ec9605a8e64e9994809e151a795b69a0",
+    "semantic_hash": "ec9605a8e64e9994809e151a795b69a0"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\electron\\types.ts": {
+    "mtime": 1787909949.6379006,
+    "ast_hash": "51d9d49d5068d28df5a22a0a1f2997b7",
+    "semantic_hash": "51d9d49d5068d28df5a22a0a1f2997b7"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\legacy_python_widget\\desktop_widget.py": {
+    "mtime": 1787908437.030523,
+    "ast_hash": "fe7b5b3833a03d8cd15145fcfcf02dd4",
+    "semantic_hash": "fe7b5b3833a03d8cd15145fcfcf02dd4"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\legacy_python_widget\\install_startup_shortcut.py": {
+    "mtime": 1787908447.4378638,
+    "ast_hash": "519ca1b66e7724a326620568f3eea2fc",
+    "semantic_hash": "519ca1b66e7724a326620568f3eea2fc"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\legacy_python_widget\\test_widget.py": {
+    "mtime": 1787908451.608147,
+    "ast_hash": "b24b32153befe87f6192aaa01e596429",
+    "semantic_hash": "b24b32153befe87f6192aaa01e596429"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\legacy_python_widget\\widget_cache.json": {
+    "mtime": 1787912413.1102107,
+    "ast_hash": "98bfd3c0499b14f2a16e67da17fb4f18",
+    "semantic_hash": "98bfd3c0499b14f2a16e67da17fb4f18"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\legacy_python_widget\\widget_config.json": {
+    "mtime": 1787912512.1051571,
+    "ast_hash": "1e5057186725192859338f0bb8846459",
+    "semantic_hash": "1e5057186725192859338f0bb8846459"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\legacy_python_widget\\widget_manager.py": {
+    "mtime": 1787908394.513149,
+    "ast_hash": "5096872215059347646f344979f73df2",
+    "semantic_hash": "5096872215059347646f344979f73df2"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\App.tsx": {
+    "mtime": 1787915661.5485346,
+    "ast_hash": "93e6ba93bd93ed48302c681d84e585e4",
+    "semantic_hash": "93e6ba93bd93ed48302c681d84e585e4"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\main.tsx": {
+    "mtime": 1787910032.084471,
+    "ast_hash": "d755aaf95f258ecf8070bad55105c54b",
+    "semantic_hash": "d755aaf95f258ecf8070bad55105c54b"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\components\\DailyProgress.tsx": {
+    "mtime": 1787909990.9387674,
+    "ast_hash": "e9af94008ddf395b4f3a4ff643af8afd",
+    "semantic_hash": "e9af94008ddf395b4f3a4ff643af8afd"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\components\\FilterBar.tsx": {
+    "mtime": 1787909995.6219766,
+    "ast_hash": "2330a030bf38c2cbe192e58477d79ad6",
+    "semantic_hash": "2330a030bf38c2cbe192e58477d79ad6"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\components\\Header.tsx": {
+    "mtime": 1787915665.086734,
+    "ast_hash": "cb20417502cb18adc6a75aafd626224a",
+    "semantic_hash": "cb20417502cb18adc6a75aafd626224a"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\components\\InlineTaskAdd.tsx": {
+    "mtime": 1787910008.0149932,
+    "ast_hash": "b1b1e7520b90f01a814010e23a085be0",
+    "semantic_hash": "b1b1e7520b90f01a814010e23a085be0"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\components\\QuickAddModal.tsx": {
+    "mtime": 1787910013.3540075,
+    "ast_hash": "946e3c0e0836ef1f13549a3a439dfe36",
+    "semantic_hash": "946e3c0e0836ef1f13549a3a439dfe36"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\components\\SettingsModal.tsx": {
+    "mtime": 1787910018.1281223,
+    "ast_hash": "4cbf7a508f1f4254616289978e4c4ad1",
+    "semantic_hash": "4cbf7a508f1f4254616289978e4c4ad1"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\components\\TaskItem.tsx": {
+    "mtime": 1787910004.2047825,
+    "ast_hash": "96a2ceefc35f891f9dbd5331636f9701",
+    "semantic_hash": "96a2ceefc35f891f9dbd5331636f9701"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\components\\TaskPreviewDrawer.tsx": {
+    "mtime": 1787909999.4615185,
+    "ast_hash": "fe2b469b2b7ff20ddacd45398a3e6478",
+    "semantic_hash": "fe2b469b2b7ff20ddacd45398a3e6478"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\lib\\notion-theme.ts": {
+    "mtime": 1787909978.4960327,
+    "ast_hash": "e563829863f2ac99ac145aa98449a970",
+    "semantic_hash": "e563829863f2ac99ac145aa98449a970"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\src\\lib\\types.ts": {
+    "mtime": 1787909974.7862532,
+    "ast_hash": "06ca0dee2eea6d138615d8f6436a19c7",
+    "semantic_hash": "06ca0dee2eea6d138615d8f6436a19c7"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\index.html": {
+    "mtime": 1787909946.6895761,
+    "ast_hash": "2993c455927ae9fb3bf5aadf9e25b678",
+    "semantic_hash": "2993c455927ae9fb3bf5aadf9e25b678"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\icon.png": {
+    "mtime": 1787911163.5178463,
+    "ast_hash": "8cc3a2a4a377ff36ddacf1cf5f194bde",
+    "semantic_hash": "8cc3a2a4a377ff36ddacf1cf5f194bde"
+  },
+  "C:\\Users\\user\\Documents\\ANDREI_FILES\\NOTION\\widget\\public\\icon.png": {
+    "mtime": 1787911163.5188553,
+    "ast_hash": "8cc3a2a4a377ff36ddacf1cf5f194bde",
+    "semantic_hash": "8cc3a2a4a377ff36ddacf1cf5f194bde"
+  }
+}

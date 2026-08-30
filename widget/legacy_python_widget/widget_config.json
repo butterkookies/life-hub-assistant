@@ -1,0 +1,15 @@
+{
+  "x": 1486,
+  "y": 34,
+  "width": 400,
+  "height": 962,
+  "theme": "light",
+  "always_on_top": true,
+  "pinned_to_desktop": false,
+  "auto_refresh_minutes": 5,
+  "show_completed": true,
+  "opacity": 0.96,
+  "filter_mode": "today",
+  "start_with_windows": true,
+  "test_key": "test_val"
+}

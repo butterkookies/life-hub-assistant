@@ -1,6 +1,8 @@
 import asyncio
+import functools
 import io
 import logging
+import secrets
 import sys
 import threading
 from datetime import datetime, timezone, timedelta
@@ -11,11 +13,12 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.request import HTTPXRequest
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -24,6 +27,7 @@ from telegram.ext import (
 
 from config import settings
 from gemini_agent import gemini_agent
+from image_models import AttachmentResult, ImageAnalysis, PendingImageScan, WorkoutUpsertResult
 from notion_service import notion_service
 from email_service import email_service
 
@@ -32,6 +36,20 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger("telegram_bot")
+
+MAX_IMAGE_BYTES = 15 * 1024 * 1024
+MAX_PENDING_IMAGE_SCANS = 4
+MAX_PENDING_IMAGE_BYTES = 40 * 1024 * 1024
+SUPPORTED_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
+PENDING_IMAGE_SCANS: dict[str, PendingImageScan] = {}
+RECENT_IMAGE_FILE_IDS: dict[str, datetime] = {}
+FAILED_IMAGE_ATTACHMENTS: dict[str, tuple[str, Optional[str], datetime]] = {}
 
 import html
 import re
@@ -122,6 +140,8 @@ async def check_auth(update: Update) -> bool:
                 update.message,
                 f"⛔ *Access Denied:* Your Telegram User ID (`{user_id}`) is not authorized to interact with this Notion workspace."
             )
+        elif update.callback_query:
+            await update.callback_query.answer("Access denied.", show_alert=True)
         return False
     return True
 
@@ -140,6 +160,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 💬 *Text me:* _'What are my high priority tasks for BSIT-31A?'_\n"
         "• 📅 *Check Schedule:* _'Scan my calendar and schedule for today'_\n"
         "• 🎙️ *Send a Voice Note:* Hold the mic button and tell me what tasks or notes to record.\n"
+        "• 📷 *Scan a Workout:* Send a clear treadmill display photo to extract and log its stats.\n"
         "• ➕ *Create Tasks:* _'Add task: Study for midterms due Friday'_\n"
         "• 🏃 *Track Fitness:* _'Log 40min treadmill walk: 2.91 km, 4006 steps, 203 cal'_\n"
         "• 🔍 *Search Workspace:* _'Find notes on Cianotes App'_\n"
@@ -168,6 +189,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• _'Mark the task Study for Finals as Done'_\n\n"
         "🏃 *Health & Treadmill:*\n"
         "• _'Log my workout: 15 min brisk walk, 0.86 km, 1371 steps, 192 cal'_\n\n"
+        "📷 *Workout Images:*\n"
+        "• Send a clear JPEG, PNG, WebP, HEIC, or HEIF treadmill display photo.\n"
+        "• High-confidence scans save automatically; uncertain values show Save, Edit, and Cancel controls.\n\n"
         "📝 *Notes & Pages:*\n"
         "• _'Read the page BSIT-31A'_\n"
         "• _'Create a new page called Weekend Shopping List under Life Hub'_\n"
@@ -306,6 +330,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• 👤 *Authorized User ID:* `{update.effective_user.id}`\n"
             f"• 📧 *Email Notifications:* {email_badge}\n"
             "• 🎙️ *Voice Note Processing:* Active\n"
+            "• 📷 *Treadmill Image Scanning:* Active (validated auto-save)\n"
             "• ⚡ *Active Tiers:* Gemini 3.5 Flash Lite / 3.1 Flash Lite / Flash Lite Latest / 3 Flash / 3.7 Flash"
         )
     except Exception as e:
@@ -320,6 +345,34 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_text = update.message.text
     user_id = str(update.effective_user.id)
+
+    pending = _pending_correction_for_user(
+        update.effective_user.id, update.effective_chat.id
+    )
+    if pending:
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id, action=ChatAction.TYPING
+        )
+        loop = asyncio.get_running_loop()
+        try:
+            corrected = await loop.run_in_executor(
+                None,
+                gemini_agent.apply_image_correction,
+                pending.analysis,
+                user_text,
+            )
+        except Exception:
+            logger.exception("Pending image correction failed")
+            await send_clean_reply(
+                update.message,
+                "⚠️ I couldn't apply that correction. Please state the field and value again.",
+            )
+            return
+        pending.analysis = corrected
+        pending.awaiting_correction = False
+        pending.shown_conflicts.clear()
+        await _send_scan_preview(update.message, pending)
+        return
     
     # Send typing indicator
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
@@ -366,6 +419,519 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await send_clean_reply(update.message, reply)
+
+
+def _cleanup_image_state() -> None:
+    now = datetime.now(timezone.utc)
+    expired_tokens = [
+        token for token, pending in PENDING_IMAGE_SCANS.items() if pending.is_expired(now)
+    ]
+    for token in expired_tokens:
+        PENDING_IMAGE_SCANS.pop(token, None)
+    stale_file_ids = [
+        file_id
+        for file_id, processed_at in RECENT_IMAGE_FILE_IDS.items()
+        if now >= processed_at + timedelta(hours=24)
+    ]
+    for file_id in stale_file_ids:
+        RECENT_IMAGE_FILE_IDS.pop(file_id, None)
+    stale_failures = [
+        file_id
+        for file_id, (_, _, failed_at) in FAILED_IMAGE_ATTACHMENTS.items()
+        if now >= failed_at + timedelta(hours=24)
+    ]
+    for file_id in stale_failures:
+        FAILED_IMAGE_ATTACHMENTS.pop(file_id, None)
+
+
+async def image_state_cleanup_scheduler() -> None:
+    """Discard expired image bytes even when the user sends no further updates."""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            _cleanup_image_state()
+        except asyncio.CancelledError:
+            logger.info("Image state cleanup scheduler stopped.")
+            break
+        except Exception:
+            logger.exception("Image state cleanup scheduler failed")
+
+
+def _pending_correction_for_user(
+    user_id: int, chat_id: int
+) -> Optional[PendingImageScan]:
+    _cleanup_image_state()
+    matches = [
+        pending
+        for pending in PENDING_IMAGE_SCANS.values()
+        if pending.user_id == user_id
+        and pending.chat_id == chat_id
+        and pending.awaiting_correction
+    ]
+    return max(matches, key=lambda item: item.created_at) if matches else None
+
+
+def _image_media(message):
+    if message.photo:
+        photo = message.photo[-1]
+        return photo, "image/jpeg", f"treadmill-{photo.file_unique_id}.jpg"
+    document = message.document
+    if document:
+        mime_type = (document.mime_type or "").lower()
+        filename = document.file_name or f"treadmill-{document.file_unique_id}"
+        return document, mime_type, filename
+    return None, "", ""
+
+
+def _scan_preview_text(
+    pending: PendingImageScan,
+    conflicts: Optional[dict[str, tuple[object, object]]] = None,
+) -> str:
+    scan = pending.analysis.treadmill
+    if not scan:
+        return "⚠️ No treadmill values were found."
+    labels = {
+        "duration_minutes": "Duration",
+        "distance_km": "Distance",
+        "steps": "Steps",
+        "calories_kcal": "Calories",
+        "speed_kmh": "Speed",
+        "heart_rate_bpm": "Heart rate",
+        "trax_program": "TRAX program",
+        "workout_type": "Workout type",
+    }
+    suffixes = {
+        "duration_minutes": " min",
+        "distance_km": " km",
+        "steps": "",
+        "calories_kcal": " kcal",
+        "speed_kmh": " km/h",
+        "heart_rate_bpm": " bpm",
+        "trax_program": "",
+        "workout_type": "",
+    }
+    lines = [
+        "📷 *Review treadmill scan*",
+        f"• Date: `{scan.date}`",
+    ]
+    for field, label in labels.items():
+        value = getattr(scan, field)
+        if value is not None:
+            marker = " ⚠️" if field in scan.uncertain_fields else ""
+            lines.append(f"• {label}: `{value}{suffixes[field]}`{marker}")
+    if conflicts:
+        lines.append("\n⚠️ *Existing values differ:* ")
+        for field, (existing, incoming) in conflicts.items():
+            lines.append(
+                f"• {labels.get(field, field)}: `{existing}` → `{incoming}`"
+            )
+    validation_errors = scan.validation_errors()
+    if validation_errors:
+        lines.append("\n⚠️ " + "; ".join(validation_errors))
+    lines.append(f"\nConfidence: `{scan.confidence:.0%}`")
+    return "\n".join(lines)
+
+
+def _scan_keyboard(token: str, allow_save: bool = True) -> InlineKeyboardMarkup:
+    buttons = []
+    if allow_save:
+        buttons.append(
+            InlineKeyboardButton("✅ Save", callback_data=f"scan:save:{token}")
+        )
+    buttons.extend(
+        [
+            InlineKeyboardButton("✏️ Edit", callback_data=f"scan:edit:{token}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"scan:cancel:{token}"),
+        ]
+    )
+    return InlineKeyboardMarkup([buttons])
+
+
+async def _send_scan_preview(
+    message,
+    pending: PendingImageScan,
+    conflicts: Optional[dict[str, tuple[object, object]]] = None,
+) -> None:
+    scan = pending.analysis.treadmill
+    allow_save = bool(scan and not scan.validation_errors())
+    await message.reply_text(
+        format_for_telegram(_scan_preview_text(pending, conflicts)),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_scan_keyboard(pending.token, allow_save=allow_save),
+        disable_web_page_preview=True,
+    )
+
+
+def _new_pending_scan(
+    update: Update,
+    analysis: ImageAnalysis,
+    image_bytes: bytes,
+    mime_type: str,
+    filename: str,
+    file_unique_id: str,
+) -> PendingImageScan:
+    # A user can review only one scan per chat. Replacing it also releases bytes.
+    replaced_tokens = [
+        token
+        for token, existing in PENDING_IMAGE_SCANS.items()
+        if existing.user_id == update.effective_user.id
+        and existing.chat_id == update.effective_chat.id
+    ]
+    for token in replaced_tokens:
+        PENDING_IMAGE_SCANS.pop(token, None)
+
+    while PENDING_IMAGE_SCANS and (
+        len(PENDING_IMAGE_SCANS) >= MAX_PENDING_IMAGE_SCANS
+        or sum(len(item.image_bytes) for item in PENDING_IMAGE_SCANS.values())
+        + len(image_bytes)
+        > MAX_PENDING_IMAGE_BYTES
+    ):
+        oldest_token = min(
+            PENDING_IMAGE_SCANS,
+            key=lambda token: PENDING_IMAGE_SCANS[token].created_at,
+        )
+        PENDING_IMAGE_SCANS.pop(oldest_token, None)
+
+    pending = PendingImageScan(
+        token=secrets.token_urlsafe(8),
+        user_id=update.effective_user.id,
+        chat_id=update.effective_chat.id,
+        image_bytes=image_bytes,
+        mime_type=mime_type,
+        filename=filename,
+        file_unique_id=file_unique_id,
+        analysis=analysis,
+    )
+    PENDING_IMAGE_SCANS[pending.token] = pending
+    return pending
+
+
+def _workout_confirmation(
+    scan,
+    result: WorkoutUpsertResult,
+    attachment: Optional[AttachmentResult],
+) -> str:
+    verb = "created" if result.action == "created" else "updated"
+    lines = [
+        f"✅ *Workout saved* — daily record {verb}.",
+        f"• Date: `{scan.date}`",
+    ]
+    display = {
+        "duration_minutes": ("Duration", " min"),
+        "distance_km": ("Distance", " km"),
+        "steps": ("Steps", ""),
+        "calories_kcal": ("Calories", " kcal"),
+        "speed_kmh": ("Speed", " km/h"),
+        "heart_rate_bpm": ("Heart rate", " bpm"),
+    }
+    for field, (label, suffix) in display.items():
+        value = getattr(scan, field)
+        if value is not None:
+            lines.append(f"• {label}: `{value}{suffix}`")
+    if attachment and attachment.attached:
+        lines.append("• Source image: attached to Notion")
+    elif attachment and attachment.retryable:
+        lines.append("⚠️ Source image upload failed; resend the image to retry attachment.")
+    elif attachment:
+        lines.append(
+            "⚠️ Notion did not confirm the image block. Check the page before retrying to avoid a duplicate."
+        )
+    if result.page_url:
+        lines.append(f"[Open Daily Health & Workout Log]({result.page_url})")
+    return "\n".join(lines)
+
+
+async def _persist_pending_scan(
+    pending: PendingImageScan,
+    allow_overwrite: bool,
+    expected_conflicts: Optional[dict[str, tuple[object, object]]] = None,
+) -> tuple[WorkoutUpsertResult, Optional[AttachmentResult]]:
+    scan = pending.analysis.treadmill
+    if not scan:
+        raise ValueError("Pending scan has no treadmill values")
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None,
+        functools.partial(
+            notion_service.upsert_daily_workout,
+            scan,
+            allow_overwrite=allow_overwrite,
+            expected_conflicts=expected_conflicts,
+        ),
+    )
+    attachment: Optional[AttachmentResult] = None
+    if result.action in ("created", "updated"):
+        attachment = await loop.run_in_executor(
+            None,
+            notion_service.attach_image,
+            result.page_id,
+            pending.image_bytes,
+            pending.mime_type,
+            pending.filename,
+        )
+        if pending.file_unique_id and attachment.attached:
+            RECENT_IMAGE_FILE_IDS[pending.file_unique_id] = datetime.now(timezone.utc)
+            FAILED_IMAGE_ATTACHMENTS.pop(pending.file_unique_id, None)
+        elif pending.file_unique_id and attachment.retryable:
+            FAILED_IMAGE_ATTACHMENTS[pending.file_unique_id] = (
+                result.page_id,
+                result.page_url,
+                datetime.now(timezone.utc),
+            )
+    return result, attachment
+
+
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Analyze an authorized Telegram image and safely persist treadmill stats."""
+    if not await check_auth(update):
+        return
+    _cleanup_image_state()
+    media, mime_type, filename = _image_media(update.message)
+    if media is None:
+        await send_clean_reply(update.message, "⚠️ Could not detect an image.")
+        return
+    if mime_type not in SUPPORTED_IMAGE_MIME_TYPES:
+        await send_clean_reply(
+            update.message,
+            "⚠️ Unsupported image format. Send JPEG, PNG, WebP, HEIC, or HEIF.",
+        )
+        return
+    if media.file_size and media.file_size > MAX_IMAGE_BYTES:
+        await send_clean_reply(update.message, "⚠️ Image is larger than the 15 MiB limit.")
+        return
+    if media.file_unique_id in RECENT_IMAGE_FILE_IDS:
+        await send_clean_reply(update.message, "ℹ️ This image was already processed recently.")
+        return
+    if any(
+        pending.file_unique_id == media.file_unique_id
+        for pending in PENDING_IMAGE_SCANS.values()
+    ):
+        await send_clean_reply(
+            update.message, "ℹ️ This image is already awaiting your review."
+        )
+        return
+
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id, action=ChatAction.TYPING
+    )
+    try:
+        telegram_file = await context.bot.get_file(media.file_id)
+        image_buffer = io.BytesIO()
+        await telegram_file.download_to_memory(image_buffer)
+        image_bytes = image_buffer.getvalue()
+    except Exception as exc:
+        logger.warning("Telegram image download failed: %s", type(exc).__name__)
+        await send_clean_reply(
+            update.message, "⚠️ I couldn't download that image. Please resend it."
+        )
+        return
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        await send_clean_reply(update.message, "⚠️ Image is larger than the 15 MiB limit.")
+        return
+
+    failed_attachment = FAILED_IMAGE_ATTACHMENTS.get(media.file_unique_id)
+    if failed_attachment:
+        page_id, page_url, _failed_at = failed_attachment
+        loop = asyncio.get_running_loop()
+        attachment = await loop.run_in_executor(
+            None,
+            notion_service.attach_image,
+            page_id,
+            image_bytes,
+            mime_type,
+            filename,
+        )
+        if attachment.attached:
+            FAILED_IMAGE_ATTACHMENTS.pop(media.file_unique_id, None)
+            RECENT_IMAGE_FILE_IDS[media.file_unique_id] = datetime.now(timezone.utc)
+            message = "✅ Source image attached to the existing workout record."
+            if page_url:
+                message += f"\n[Open Daily Health & Workout Log]({page_url})"
+            await send_clean_reply(update.message, message)
+        elif attachment.retryable:
+            FAILED_IMAGE_ATTACHMENTS[media.file_unique_id] = (
+                page_id,
+                page_url,
+                datetime.now(timezone.utc),
+            )
+            await send_clean_reply(
+                update.message,
+                "⚠️ The workout metrics remain saved, but the image upload failed again. Please retry later.",
+            )
+        else:
+            FAILED_IMAGE_ATTACHMENTS.pop(media.file_unique_id, None)
+            message = (
+                "⚠️ Notion did not confirm the image block. Check the page before "
+                "retrying to avoid a duplicate."
+            )
+            if page_url:
+                message += f"\n[Open Daily Health & Workout Log]({page_url})"
+            await send_clean_reply(update.message, message)
+        return
+
+    loop = asyncio.get_running_loop()
+    try:
+        analysis = await loop.run_in_executor(
+            None,
+            gemini_agent.process_image_message,
+            str(update.effective_user.id),
+            image_bytes,
+            mime_type,
+            update.message.caption or "",
+            update.message.date,
+        )
+    except Exception:
+        logger.exception("Image analysis failed")
+        await send_clean_reply(
+            update.message,
+            "⚠️ I couldn't read that image right now. Please resend a clearer photo.",
+        )
+        return
+
+    logger.info("Image routed to domain=%s", analysis.domain)
+    if analysis.domain != "treadmill" or not analysis.treadmill:
+        await send_clean_reply(
+            update.message,
+            f"🖼️ I can read the image, but it is not a supported treadmill scan yet: {analysis.summary}",
+        )
+        return
+
+    pending = _new_pending_scan(
+        update,
+        analysis,
+        image_bytes,
+        mime_type,
+        filename,
+        media.file_unique_id,
+    )
+    if not analysis.treadmill.is_auto_save_eligible():
+        await _send_scan_preview(update.message, pending)
+        return
+
+    try:
+        result, attachment = await _persist_pending_scan(pending, allow_overwrite=False)
+    except Exception:
+        logger.exception("Workout persistence failed")
+        await _send_scan_preview(update.message, pending)
+        return
+    if result.action == "conflict":
+        pending.shown_conflicts = result.conflicts
+        await _send_scan_preview(update.message, pending, result.conflicts)
+        return
+    PENDING_IMAGE_SCANS.pop(pending.token, None)
+    if result.action == "duplicate":
+        RECENT_IMAGE_FILE_IDS[media.file_unique_id] = datetime.now(timezone.utc)
+        await send_clean_reply(
+            update.message,
+            "ℹ️ This workout is already recorded for that date; no duplicate image was attached.",
+        )
+        return
+    await send_clean_reply(
+        update.message,
+        _workout_confirmation(analysis.treadmill, result, attachment),
+    )
+
+
+async def handle_scan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle Save/Edit/Cancel for an uncertain or conflicting scan."""
+    query = update.callback_query
+    if not query or not await check_auth(update):
+        return
+    parts = (query.data or "").split(":", 2)
+    if len(parts) != 3 or parts[0] != "scan":
+        await query.answer("Invalid scan action.", show_alert=True)
+        return
+    action, token = parts[1], parts[2]
+    pending = PENDING_IMAGE_SCANS.get(token)
+    if not pending or pending.is_expired():
+        PENDING_IMAGE_SCANS.pop(token, None)
+        await query.answer("This scan expired. Please resend the image.", show_alert=True)
+        return
+    query_chat_id = getattr(query.message, "chat_id", None)
+    if pending.user_id != query.from_user.id or pending.chat_id != query_chat_id:
+        await query.answer("This scan is not yours.", show_alert=True)
+        return
+    if action == "cancel":
+        PENDING_IMAGE_SCANS.pop(token, None)
+        await query.answer("Cancelled")
+        await query.edit_message_text("❌ Treadmill scan cancelled.")
+        return
+    if action == "edit":
+        pending.awaiting_correction = True
+        await query.answer("Reply with your correction")
+        await query.edit_message_text(
+            "✏️ Reply with the corrected field and value, for example: “Distance is 3.01 km.”"
+        )
+        return
+    if action != "save":
+        await query.answer("Invalid scan action.", show_alert=True)
+        return
+
+    scan = pending.analysis.treadmill
+    if not scan or scan.validation_errors():
+        await query.answer(
+            "Fix the invalid values before saving.", show_alert=True
+        )
+        await query.edit_message_text(
+            format_for_telegram(_scan_preview_text(pending)),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_scan_keyboard(token, allow_save=False),
+            disable_web_page_preview=True,
+        )
+        return
+
+    await query.answer("Saving…")
+    try:
+        # Always inspect current Notion values first. A changed value gets shown once
+        # before a second explicit Save can replace it.
+        result, attachment = await _persist_pending_scan(
+            pending, allow_overwrite=False
+        )
+        if result.action == "conflict":
+            if pending.shown_conflicts != result.conflicts:
+                pending.shown_conflicts = result.conflicts
+                await query.edit_message_text(
+                    format_for_telegram(
+                        _scan_preview_text(pending, result.conflicts)
+                    ),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=_scan_keyboard(token),
+                    disable_web_page_preview=True,
+                )
+                return
+            result, attachment = await _persist_pending_scan(
+                pending,
+                allow_overwrite=True,
+                expected_conflicts=pending.shown_conflicts,
+            )
+            if result.action == "conflict":
+                pending.shown_conflicts = result.conflicts
+                await query.edit_message_text(
+                    format_for_telegram(
+                        _scan_preview_text(pending, result.conflicts)
+                    ),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=_scan_keyboard(token),
+                    disable_web_page_preview=True,
+                )
+                return
+    except Exception:
+        logger.exception("Confirmed workout persistence failed")
+        await query.edit_message_text(
+            "⚠️ The workout could not be saved. Please resend the image and try again."
+        )
+        return
+    PENDING_IMAGE_SCANS.pop(token, None)
+    if result.action == "duplicate":
+        await query.edit_message_text(
+            "ℹ️ This workout is already recorded; no duplicate image was attached."
+        )
+        return
+    await query.edit_message_text(
+        format_for_telegram(_workout_confirmation(scan, result, attachment)),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     """Minimal HTTP server responding to cloud health checks (Render, Koyeb, Railway)."""
@@ -463,6 +1029,7 @@ async def daily_briefing_scheduler(app: Application):
 async def post_init(application: Application) -> None:
     """Initialize background services when bot event loop starts."""
     asyncio.create_task(daily_briefing_scheduler(application))
+    asyncio.create_task(image_state_cleanup_scheduler())
 
 def main():
     token = settings.TELEGRAM_BOT_TOKEN
@@ -490,6 +1057,8 @@ def main():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("briefing", briefing_command))
     app.add_handler(CommandHandler("email", email_command))
+    app.add_handler(CallbackQueryHandler(handle_scan_callback, pattern=r"^scan:(save|edit|cancel):"))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
 

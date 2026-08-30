@@ -1,0 +1,275 @@
+{
+  "tasks": [
+    {
+      "id": "3ca27102-5287-810b-a4ef-d5beccf2268f",
+      "name": "Design personal logo mark and variations",
+      "date": "2026-08-28",
+      "status": "In progress",
+      "priority": "Normal",
+      "project_id": "3be27102-5287-8146-bb43-d2622fd62e0f",
+      "project_name": "Personal Brand Identity",
+      "url": "https://app.notion.com/p/Design-personal-logo-mark-and-variations-3ca271025287810ba4efd5beccf2268f",
+      "properties": {
+        "Projects": [
+          "3be27102-5287-8146-bb43-d2622fd62e0f"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [],
+        "Status": "In progress",
+        "Name": "Design personal logo mark and variations"
+      }
+    },
+    {
+      "id": "3ca27102-5287-811e-a655-f89b9f72d0f3",
+      "name": "Sync & Document Full Architecture in Notion Life Hub Manager",
+      "date": "2026-08-28",
+      "status": "Done",
+      "priority": "Normal",
+      "project_id": "3c127102-5287-81e7-8466-e35ede5be8df",
+      "project_name": "Telegram Notion AI Assistant",
+      "url": "https://app.notion.com/p/Sync-Document-Full-Architecture-in-Notion-Life-Hub-Manager-3ca271025287811ea655f89b9f72d0f3",
+      "properties": {
+        "Projects": [
+          "3c127102-5287-81e7-8466-e35ede5be8df"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [],
+        "Status": "Done",
+        "Name": "Sync & Document Full Architecture in Notion Life Hub Manager"
+      }
+    },
+    {
+      "id": "3ca27102-5287-81d3-ac49-dc249ef1178d",
+      "name": "Deploy 24/7 Production Web Service on Render with Health Check Server",
+      "date": "2026-08-28",
+      "status": "Done",
+      "priority": "Normal",
+      "project_id": "3c127102-5287-81e7-8466-e35ede5be8df",
+      "project_name": "Telegram Notion AI Assistant",
+      "url": "https://app.notion.com/p/Deploy-24-7-Production-Web-Service-on-Render-with-Health-Check-Server-3ca27102528781d3ac49dc249ef1178d",
+      "properties": {
+        "Projects": [
+          "3c127102-5287-81e7-8466-e35ede5be8df"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [],
+        "Status": "Done",
+        "Name": "Deploy 24/7 Production Web Service on Render with Health Check Server"
+      }
+    },
+    {
+      "id": "3ca27102-5287-8122-8084-f11f7693adbf",
+      "name": "Refactor Telegram HTML Parser & Eliminate Formatting Entity Artifacts",
+      "date": "2026-08-28",
+      "status": "Done",
+      "priority": "Normal",
+      "project_id": "3c127102-5287-81e7-8466-e35ede5be8df",
+      "project_name": "Telegram Notion AI Assistant",
+      "url": "https://app.notion.com/p/Refactor-Telegram-HTML-Parser-Eliminate-Formatting-Entity-Artifacts-3ca27102528781228084f11f7693adbf",
+      "properties": {
+        "Projects": [
+          "3c127102-5287-81e7-8466-e35ede5be8df"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [],
+        "Status": "Done",
+        "Name": "Refactor Telegram HTML Parser & Eliminate Formatting Entity Artifacts"
+      }
+    },
+    {
+      "id": "3ca27102-5287-810d-a6c8-e711f14f93c3",
+      "name": "Integrate Resend API & SMTP Delivery with Curated HTML Cards",
+      "date": "2026-08-28",
+      "status": "Done",
+      "priority": "Normal",
+      "project_id": "3c127102-5287-81e7-8466-e35ede5be8df",
+      "project_name": "Telegram Notion AI Assistant",
+      "url": "https://app.notion.com/p/Integrate-Resend-API-SMTP-Delivery-with-Curated-HTML-Cards-3ca271025287810da6c8e711f14f93c3",
+      "properties": {
+        "Projects": [
+          "3c127102-5287-81e7-8466-e35ede5be8df"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [],
+        "Status": "Done",
+        "Name": "Integrate Resend API & SMTP Delivery with Curated HTML Cards"
+      }
+    },
+    {
+      "id": "3c727102-5287-81a5-b031-cc13d9353144",
+      "name": "Research 1-bagger gasoline cement mixer on Shopee for Dad",
+      "date": "2026-08-28",
+      "status": "Not started",
+      "priority": "Normal",
+      "project_id": null,
+      "project_name": "Personal",
+      "url": "https://app.notion.com/p/Research-1-bagger-gasoline-cement-mixer-on-Shopee-for-Dad-3c727102528781a5b031cc13d9353144",
+      "properties": {
+        "Projects": [],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [],
+        "Status": "Not started",
+        "Name": "Research 1-bagger gasoline cement mixer on Shopee for Dad"
+      }
+    },
+    {
+      "id": "3c327102-5287-814b-994e-f40e99397308",
+      "name": "Make Page Index thumbnails sharp and consistently framed",
+      "date": "2026-08-28",
+      "status": "In progress",
+      "priority": "Normal",
+      "project_id": "3be27102-5287-816c-959a-c503ca413bc6",
+      "project_name": "Cianotes App",
+      "url": "https://app.notion.com/p/Make-Page-Index-thumbnails-sharp-and-consistently-framed-3c3271025287814b994ef40e99397308",
+      "properties": {
+        "Projects": [
+          "3be27102-5287-816c-959a-c503ca413bc6"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [],
+        "Status": "In progress",
+        "Name": "Make Page Index thumbnails sharp and consistently framed"
+      }
+    },
+    {
+      "id": "3c327102-5287-8192-bfd6-c2845aa2ad65",
+      "name": "Add drawing-tool size and strength controls",
+      "date": "2026-08-28",
+      "status": "In progress",
+      "priority": "Normal",
+      "project_id": "3be27102-5287-816c-959a-c503ca413bc6",
+      "project_name": "Cianotes App",
+      "url": "https://app.notion.com/p/Add-drawing-tool-size-and-strength-controls-3c32710252878192bfd6c2845aa2ad65",
+      "properties": {
+        "Projects": [
+          "3be27102-5287-816c-959a-c503ca413bc6"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [],
+        "Status": "In progress",
+        "Name": "Add drawing-tool size and strength controls"
+      }
+    },
+    {
+      "id": "3c027102-5287-81ad-bcd2-dcb85d432f55",
+      "name": "List and categorize showcase projects (3D, Dev, Design, Drawing, Video)",
+      "date": "2026-08-28",
+      "status": "In progress",
+      "priority": "Normal",
+      "project_id": "3be27102-5287-811d-ab16-ed7bb7156ce1",
+      "project_name": "Personal Portfolio",
+      "url": "https://app.notion.com/p/List-and-categorize-showcase-projects-3D-Dev-Design-Drawing-Video-3c027102528781adbcd2dcb85d432f55",
+      "properties": {
+        "Projects": [
+          "3be27102-5287-811d-ab16-ed7bb7156ce1"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [
+          "3be27102-5287-8196-adf3-f25d021dbdf7"
+        ],
+        "Status": "In progress",
+        "Name": "List and categorize showcase projects (3D, Dev, Design, Drawing, Video)"
+      }
+    },
+    {
+      "id": "3c027102-5287-8138-b39e-c91493c928df",
+      "name": "Create a logo to identify myself",
+      "date": "2026-08-28",
+      "status": "Not started",
+      "priority": "Normal",
+      "project_id": "3be27102-5287-811d-ab16-ed7bb7156ce1",
+      "project_name": "Personal Portfolio",
+      "url": "https://app.notion.com/p/Create-a-logo-to-identify-myself-3c02710252878138b39ec91493c928df",
+      "properties": {
+        "Projects": [
+          "3be27102-5287-811d-ab16-ed7bb7156ce1"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [
+          "3be27102-5287-81ac-9648-e2ee441c2a99"
+        ],
+        "Status": "Not started",
+        "Name": "Create a logo to identify myself"
+      }
+    },
+    {
+      "id": "3c027102-5287-8167-9b71-d6f1f5ee1ea2",
+      "name": "MS - Act#2: GameAsset-sword",
+      "date": "2026-08-28",
+      "status": "Not started",
+      "priority": "Normal",
+      "project_id": "3be27102-5287-8167-957c-f6825d481689",
+      "project_name": "BSIT-31A",
+      "url": "https://app.notion.com/p/MS-Act-2-GameAsset-sword-3c027102528781679b71d6f1f5ee1ea2",
+      "properties": {
+        "Projects": [
+          "3be27102-5287-8167-957c-f6825d481689"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [
+          "3be27102-5287-81f3-a236-f9034b0c8b3c"
+        ],
+        "Status": "Not started",
+        "Name": "MS - Act#2: GameAsset-sword"
+      }
+    },
+    {
+      "id": "3be27102-5287-81ba-a2c9-d6225dfa2777",
+      "name": "Set a sustainable savings target",
+      "date": "2026-08-28",
+      "status": "In progress",
+      "priority": "Normal",
+      "project_id": "3be27102-5287-8191-b7ec-df3cacdb265f",
+      "project_name": "Personal Finance Baseline",
+      "url": "https://app.notion.com/p/Set-a-sustainable-savings-target-3be27102528781baa2c9d6225dfa2777",
+      "properties": {
+        "Projects": [
+          "3be27102-5287-8191-b7ec-df3cacdb265f"
+        ],
+        "Archive": false,
+        "Do Date": "2026-08-28",
+        "Workstream": [
+          "3be27102-5287-815c-9b30-f29ac8fc142b"
+        ],
+        "Status": "In progress",
+        "Name": "Set a sustainable savings target"
+      }
+    }
+  ],
+  "projects": {
+    "3c127102-5287-81e7-8466-e35ede5be8df": "Telegram Notion AI Assistant",
+    "3c127102528781e78466e35ede5be8df": "Telegram Notion AI Assistant",
+    "3be27102-5287-811d-ab16-ed7bb7156ce1": "Personal Portfolio",
+    "3be271025287811dab16ed7bb7156ce1": "Personal Portfolio",
+    "3be27102-5287-812c-b2f9-fd5c3690f556": "Cortex",
+    "3be271025287812cb2f9fd5c3690f556": "Cortex",
+    "3be27102-5287-813a-a28c-f73397265eab": "LITE Member & Multimedia Directory",
+    "3be271025287813aa28cf73397265eab": "LITE Member & Multimedia Directory",
+    "3be27102-5287-8146-bb43-d2622fd62e0f": "Personal Brand Identity",
+    "3be2710252878146bb43d2622fd62e0f": "Personal Brand Identity",
+    "3be27102-5287-8150-8acf-f8d2b9c52119": "LITE Publications & Social Posts",
+    "3be27102528781508acff8d2b9c52119": "LITE Publications & Social Posts",
+    "3be27102-5287-8167-957c-f6825d481689": "BSIT-31A",
+    "3be2710252878167957cf6825d481689": "BSIT-31A",
+    "3be27102-5287-816c-959a-c503ca413bc6": "Cianotes App",
+    "3be271025287816c959ac503ca413bc6": "Cianotes App",
+    "3be27102-5287-8191-b7ec-df3cacdb265f": "Personal Finance Baseline",
+    "3be2710252878191b7ecdf3cacdb265f": "Personal Finance Baseline",
+    "3be27102-5287-81fb-b860-c7cffe8a237a": "Hirono 3D Models",
+    "3be27102528781fbb860c7cffe8a237a": "Hirono 3D Models",
+    "d3f27102-5287-8358-b8df-818c0dcdd7b7": "FinLITE",
+    "d3f2710252878358b8df818c0dcdd7b7": "FinLITE"
+  },
+  "last_synced": "2026-08-28T18:20:13.109990"
+}
