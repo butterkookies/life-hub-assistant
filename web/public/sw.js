@@ -1,19 +1,16 @@
 // Service Worker for Andrei's Life Hub Assistant
-const CACHE_NAME = 'life-hub-v1';
+const CACHE_NAME = 'life-hub-v2';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
-  '/icons/apple-touch-icon.png'
+  '/icons/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    }).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
   );
 });
 
@@ -30,7 +27,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Network-first for API requests, do not cache API mutations
+  // 1. API requests: Strictly Network-Only (never serve cached stale API responses)
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(event.request).catch(() => {
@@ -38,32 +35,43 @@ self.addEventListener('fetch', (event) => {
           JSON.stringify({
             error: {
               code: 'OFFLINE',
-              message: 'You appear to be offline. Please reconnect to communicate with your Notion Assistant.'
-            }
+              message: 'You appear to be offline. Please reconnect to communicate with your Notion Assistant.',
+            },
           }),
-          {
-            status: 503,
-            headers: { 'Content-Type': 'application/json' }
-          }
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
         );
       })
     );
     return;
   }
 
-  // Stale-while-revalidate for static shell assets
+  // 2. HTML Navigation: Network-First! (Ensures latest Vite bundle hashes are loaded, never stale blank screen)
+  if (event.request.mode === 'navigate' || event.request.headers.get('accept')?.includes('text/html')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.status === 200) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match('/index.html') || caches.match('/'))
+    );
+    return;
+  }
+
+  // 3. Static Assets: Network-first with cache fallback
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const networked = fetch(event.request).then((response) => {
-        if (response.status === 200) {
-          const cacheCopy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cacheCopy));
+    fetch(event.request)
+      .then((response) => {
+        if (response.status === 200 && event.request.method === 'GET') {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         }
         return response;
-      }).catch(() => cached);
-
-      return cached || networked;
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });
 
@@ -74,7 +82,7 @@ self.addEventListener('push', (event) => {
     body: 'You have a new update.',
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    data: { url: '/' }
+    data: { url: '/' },
   };
 
   if (event.data) {
@@ -90,12 +98,10 @@ self.addEventListener('push', (event) => {
     icon: payload.icon || '/icons/icon-192.png',
     badge: payload.badge || '/icons/icon-192.png',
     vibrate: [100, 50, 100],
-    data: payload.data || { url: '/' }
+    data: payload.data || { url: '/' },
   };
 
-  event.waitUntil(
-    self.registration.showNotification(payload.title, options)
-  );
+  event.waitUntil(self.registration.showNotification(payload.title, options));
 });
 
 self.addEventListener('notificationclick', (event) => {
