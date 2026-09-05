@@ -1,19 +1,20 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
-  Send,
+  ArrowUp,
   Mic,
-  Camera,
-  Paperclip,
+  Plus,
   X,
   Check,
-  AlertCircle
+  FileText,
 } from 'lucide-react';
-
 import { useMediaRecorder } from '../hooks/useMediaRecorder';
 
 interface MessageComposerProps {
   onSendMessage: (text: string) => void;
   onUploadMedia: (file: File, caption?: string) => void;
+  onOpenMediaSheet: () => void;
+  fileInputRef: React.RefObject<HTMLInputElement>;
+  cameraInputRef: React.RefObject<HTMLInputElement>;
   disabled?: boolean;
   isOnline: boolean;
 }
@@ -21,6 +22,9 @@ interface MessageComposerProps {
 export const MessageComposer: React.FC<MessageComposerProps> = ({
   onSendMessage,
   onUploadMedia,
+  onOpenMediaSheet,
+  fileInputRef,
+  cameraInputRef,
   disabled = false,
   isOnline,
 }) => {
@@ -28,19 +32,16 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   const {
     isRecording,
     duration,
-    error: micError,
     startRecording,
     stopRecording,
     cancelRecording,
   } = useMediaRecorder();
 
-  // Auto-grow textarea
+  // Auto-grow textarea up to 120px
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -69,7 +70,6 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      // Send on Enter unless shift is pressed (on non-mobile)
       if (window.innerWidth > 640) {
         e.preventDefault();
         handleSend();
@@ -93,9 +93,11 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({
   const handleFinishVoice = async () => {
     const result = await stopRecording();
     if (result && result.blob) {
-      const file = new File([result.blob], `voice_${Date.now()}.${result.mimeType.includes('mp4') ? 'mp4' : 'webm'}`, {
-        type: result.mimeType,
-      });
+      const file = new File(
+        [result.blob],
+        `voice_${Date.now()}.${result.mimeType.includes('mp4') ? 'mp4' : 'webm'}`,
+        { type: result.mimeType }
+      );
       onUploadMedia(file);
     }
   };
@@ -106,177 +108,139 @@ export const MessageComposer: React.FC<MessageComposerProps> = ({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  const hasContent = text.trim().length > 0 || selectedFile !== null;
+
   return (
-    <div
-      className="sticky bottom-0 z-20 border-t border-notion-border bg-notion-bg/95 backdrop-blur-md px-3 sm:px-4 pt-3 pb-safe"
-      style={{ paddingBottom: 'max(1.25rem, calc(0.75rem + env(safe-area-inset-bottom, 0px)))' }}
-    >
-      {/* Offline Warning Banner */}
-      {!isOnline && (
-        <div className="mb-2 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
-          <span className="flex items-center">
-            <AlertCircle className="mr-1.5 h-3.5 w-3.5 text-amber-600" />
-            You are offline. Reconnect to send messages or execute Notion tasks.
-          </span>
-        </div>
-      )}
+    <div className="fixed bottom-0 left-0 right-0 z-30 pointer-events-none pb-safe">
+      <div className="max-w-2xl mx-auto px-3 sm:px-6 mb-3 sm:mb-5 pointer-events-auto">
+        {/* Hidden native file inputs triggered by MediaBottomSheet */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={handleFileChange}
+        />
 
-      {/* Mic Error Notice */}
-      {micError && (
-        <div className="mb-2 flex items-center justify-between rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-900">
-          <span>{micError}</span>
-          <button onClick={() => cancelRecording()} className="p-0.5 text-red-700 hover:text-red-900">
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Selected File / Image Preview */}
-      {selectedFile && (
-        <div className="mb-2 flex items-center space-x-2 rounded-xl border border-notion-border bg-notion-card p-2 shadow-sm max-w-sm">
-          {filePreview ? (
-            <img src={filePreview} alt="Upload preview" className="h-12 w-12 rounded-lg object-cover" />
-          ) : (
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-notion-paper text-notion-secondary">
-              <Paperclip className="h-5 w-5" />
+        {/* Selected File Preview Float */}
+        {selectedFile && (
+          <div className="mb-2 flex items-center space-x-2 rounded-2xl border border-surface-border bg-surface-card/95 p-2 shadow-sm backdrop-blur-md animate-in fade-in slide-in-from-bottom-2">
+            {filePreview ? (
+              <img
+                src={filePreview}
+                alt="Upload preview"
+                className="h-10 w-10 rounded-xl object-cover border border-surface-border"
+              />
+            ) : (
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-blueLight text-brand-blue">
+                <FileText className="h-5 w-5" />
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-medium text-content-primary truncate">{selectedFile.name}</div>
+              <div className="text-[10px] text-content-secondary">{(selectedFile.size / 1024).toFixed(1)} KB</div>
             </div>
-          )}
-          <div className="flex-1 min-w-0 text-xs">
-            <p className="truncate font-medium text-notion-text">{selectedFile.name}</p>
-            <p className="text-[10px] text-notion-secondary">
-              {(selectedFile.size / 1024).toFixed(0)} KB
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              setSelectedFile(null);
-              setFilePreview(null);
-            }}
-            className="rounded-lg p-1.5 text-notion-secondary hover:bg-notion-paper hover:text-notion-text"
-            title="Remove attachment"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Composer Input Area */}
-      {isRecording ? (
-        /* Voice Recording Active Bar */
-        <div className="flex items-center justify-between rounded-2xl border border-red-200 bg-red-50/70 px-4 py-2.5 shadow-sm">
-          <div className="flex items-center space-x-2.5">
-            <span className="flex h-3 w-3 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600" />
-            </span>
-            <span className="text-sm font-semibold text-red-900">{formatTimer(duration)}</span>
-            <span className="text-xs text-red-700 hidden sm:inline">Recording voice note...</span>
-          </div>
-          <div className="flex items-center space-x-1.5">
             <button
-              onClick={cancelRecording}
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-notion-secondary border border-notion-border shadow-sm hover:text-notion-red transition-colors"
-              title="Cancel recording"
-              aria-label="Cancel recording"
+              onClick={() => {
+                setSelectedFile(null);
+                setFilePreview(null);
+              }}
+              className="p-1 rounded-full text-content-muted hover:bg-surface-secondary hover:text-content-primary"
             >
               <X className="h-4 w-4" />
             </button>
-            <button
-              onClick={handleFinishVoice}
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-notion-blue text-white shadow-sm hover:bg-notion-blueHover transition-colors active:scale-95"
-              title="Send voice note"
-              aria-label="Send voice note"
-            >
-              <Check className="h-4 w-4" />
-            </button>
           </div>
-        </div>
-      ) : (
-        /* Standard Text & Media Composer */
-        <div className="flex items-end space-x-1.5 sm:space-x-2">
-          {/* Media Attachments Buttons */}
-          <div className="flex items-center space-x-0.5 pb-1">
-            {/* Camera Capture */}
-            <input
-              ref={cameraInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-              capture="environment"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-            <button
-              type="button"
-              onClick={() => cameraInputRef.current?.click()}
-              disabled={disabled || !isOnline}
-              className="flex h-10 w-10 items-center justify-center rounded-xl text-notion-secondary hover:bg-notion-paper hover:text-notion-text active:scale-95 disabled:opacity-40 transition-colors"
-              title="Take photo"
-              aria-label="Take photo"
-            >
-              <Camera className="h-5 w-5" />
-            </button>
+        )}
 
-            {/* Photo Library / File Upload */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/heic,image/heif,audio/*"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || !isOnline}
-              className="flex h-10 w-10 items-center justify-center rounded-xl text-notion-secondary hover:bg-notion-paper hover:text-notion-text active:scale-95 disabled:opacity-40 transition-colors"
-              title="Attach photo or audio"
-              aria-label="Attach photo or audio"
-            >
-              <Paperclip className="h-5 w-5" />
-            </button>
+        {/* Recording Mode Pill */}
+        {isRecording ? (
+          <div className="flex items-center justify-between rounded-full border border-red-200 dark:border-red-900/40 bg-surface-card/95 px-4 py-3 shadow-composer-light dark:shadow-composer-dark backdrop-blur-xl">
+            <div className="flex items-center space-x-3">
+              <span className="relative flex h-3 w-3">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+              </span>
+              <span className="text-xs font-medium text-red-600 dark:text-red-400">
+                Recording audio {formatTimer(duration)}
+              </span>
+            </div>
 
-            {/* Voice Record Mic */}
-            <button
-              type="button"
-              onClick={() => startRecording()}
-              disabled={disabled || !isOnline}
-              className="flex h-10 w-10 items-center justify-center rounded-xl text-notion-secondary hover:bg-notion-paper hover:text-notion-blue active:scale-95 disabled:opacity-40 transition-colors"
-              title="Record voice note"
-              aria-label="Record voice note"
-            >
-              <Mic className="h-5 w-5" />
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={cancelRecording}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-content-muted hover:bg-surface-secondary hover:text-content-primary transition-colors"
+                title="Cancel recording"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <button
+                onClick={handleFinishVoice}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-blue text-white shadow-sm transition-transform active:scale-95"
+                title="Send voice message"
+              >
+                <Check className="h-4 w-4" />
+              </button>
+            </div>
           </div>
+        ) : (
+          /* Normal Floating Pill Composer (Gemini iOS Style) */
+          <div className="flex items-center rounded-full border border-surface-border bg-surface-elevated/95 px-2.5 py-1.5 shadow-composer-light dark:shadow-composer-dark backdrop-blur-xl transition-all focus-within:border-brand-blue/60 focus-within:ring-2 focus-within:ring-brand-blue/10">
+            {/* Left: [+] Expander Button */}
+            <button
+              onClick={onOpenMediaSheet}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-secondary text-content-primary hover:bg-surface-secondary/80 active:scale-95 transition-all"
+              title="Add photos, camera or actions"
+              aria-label="Add media"
+            >
+              <Plus className="h-5 w-5 text-content-primary" />
+            </button>
 
-          {/* Growing Textarea */}
-          <div className="flex-1 min-w-0 rounded-2xl border border-notion-border bg-notion-card px-3 py-2 shadow-sm focus-within:border-notion-blue focus-within:ring-1 focus-within:ring-notion-blue transition-all">
+            {/* Center: Auto-resizing Text Input */}
             <textarea
               ref={textareaRef}
               rows={1}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={disabled ? 'Waiting for response...' : 'Ask Life Hub or log a workout...'}
+              placeholder="Ask Life Hub..."
               disabled={disabled || !isOnline}
-              className="w-full resize-none bg-transparent text-sm text-notion-text placeholder-notion-muted focus:outline-none max-h-32"
+              className="flex-1 resize-none bg-transparent px-3 py-2 text-sm text-content-primary placeholder-content-muted outline-none disabled:opacity-50"
+              style={{ maxHeight: '120px' }}
             />
-          </div>
 
-          {/* Send Button */}
-          <div className="pb-1">
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={disabled || !isOnline || (!text.trim() && !selectedFile)}
-              className="flex h-10 w-10 items-center justify-center rounded-2xl bg-notion-blue text-white shadow-sm hover:bg-notion-blueHover active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
-              title="Send message"
-              aria-label="Send message"
-            >
-              <Send className="h-4 w-4" />
-            </button>
+            {/* Right: Dynamic Mic / Send Action */}
+            {hasContent ? (
+              <button
+                onClick={handleSend}
+                disabled={disabled || !isOnline}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-blue text-white shadow-sm transition-all hover:bg-brand-blueHover active:scale-95 disabled:opacity-50"
+                title="Send message"
+                aria-label="Send message"
+              >
+                <ArrowUp className="h-4 w-4 stroke-[2.5]" />
+              </button>
+            ) : (
+              <button
+                onClick={startRecording}
+                disabled={disabled || !isOnline}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-content-secondary hover:text-brand-blue hover:bg-surface-secondary transition-all active:scale-95 disabled:opacity-50"
+                title="Record voice note"
+                aria-label="Record voice note"
+              >
+                <Mic className="h-5 w-5" />
+              </button>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };
