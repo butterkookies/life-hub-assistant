@@ -87,10 +87,11 @@ def create_app() -> FastAPI:
     # 1. Security Headers
     app.add_middleware(SecurityHeadersMiddleware)
 
-    # 2. CORS (Explicit origins with credentials, no wildcards)
+    # 2. CORS (Explicit origins with credentials, plus common cloud domains)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.WEB_ALLOWED_ORIGINS,
+        allow_origin_regex=r"^https?://.*(onrender\.com|up\.railway\.app|trycloudflare\.com|localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
         allow_headers=["*"],
@@ -203,7 +204,7 @@ def main():
     import uvicorn
     port = settings.PORT or 8000
     print(f"🚀 Starting Life Hub Assistant server on port {port}...")
-    uvicorn.run("server.main:app", host="127.0.0.1", port=port, reload=False)
+    uvicorn.run("server.main:app", host="0.0.0.0", port=port, reload=False)
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+data/
+backups/
+web/node_modules/
+web/dist/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+tests/
+graphify-out/
+scan_secrets.py
+test_connections.py
+test_telegram.py
