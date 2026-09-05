@@ -152,7 +152,7 @@ export const DesignKitView: React.FC<DesignKitViewProps> = ({
 
   return (
     <div
-      className={`relative min-h-screen w-full transition-colors duration-200 ${
+      className={`fixed inset-0 z-50 flex flex-col h-full w-full overflow-y-auto overflow-x-hidden transition-colors duration-200 ${
         sbTheme === 'dark' ? 'dark bg-[#090a0f] text-[#f3f4f6]' : 'bg-[#f8f9fb] text-[#111827]'
       }`}
       style={
@@ -162,65 +162,32 @@ export const DesignKitView: React.FC<DesignKitViewProps> = ({
           '--sb-padding': `${sbPadding}px`,
           '--sb-accent': sbAccent,
           fontSize: `${sbFontScale}%`,
+          WebkitOverflowScrolling: 'touch',
         } as React.CSSProperties
       }
     >
       {/* Background ambient moving gradient canvas */}
       <div className="moving-gradient-canvas opacity-70" aria-hidden="true" />
 
-      {/* Top Navigation Bar of Design Kit */}
-      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-surface-borderSubtle bg-surface-bg/85 px-4 py-3 backdrop-blur-xl pt-safe">
+      {/* Top Navigation Bar of Design Kit (Spacious, uncompressed, icon-only back button) */}
+      <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 bg-surface-bg/85 backdrop-blur-xl border-b border-surface-borderSubtle shrink-0">
         <div className="flex items-center space-x-3">
           <button
             onClick={onBackToChat}
-            className="flex items-center space-x-1.5 rounded-full bg-surface-card px-3 py-1.5 text-xs font-semibold text-content-primary shadow-xs border border-surface-border hover:bg-surface-secondary active:scale-95 transition-all"
-            title="Return to conversation"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-card border border-surface-border text-content-primary shadow-xs hover:bg-surface-secondary active:scale-95 transition-all"
+            title="Back to Chat"
+            aria-label="Back to Chat"
           >
-            <ArrowLeft className="h-4 w-4" />
-            <span>Back to Chat</span>
+            <ArrowLeft className="h-5 w-5" />
           </button>
-          <div>
-            <h1 className="text-sm font-bold tracking-tight text-content-primary flex items-center space-x-2">
-              <span>Life Hub Design Kit</span>
-              <span className="rounded-md bg-brand-blue/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand-blue uppercase">
-                Studio
-              </span>
-            </h1>
-          </div>
-        </div>
-
-        <div className="flex items-center space-x-2">
-          {/* Quick theme flip for sandbox */}
-          <button
-            onClick={() => setSbTheme(sbTheme === 'light' ? 'dark' : 'light')}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-card border border-surface-border shadow-xs text-content-primary hover:bg-surface-secondary active:scale-95 transition-transform"
-            title={`Switch preview to ${sbTheme === 'light' ? 'Dark' : 'Light'} mode`}
-          >
-            {sbTheme === 'light' ? (
-              <Moon className="h-4 w-4 text-indigo-500" />
-            ) : (
-              <Sun className="h-4 w-4 text-amber-400" />
-            )}
-          </button>
-
-          {/* Export Report Trigger */}
-          <button
-            onClick={() => setShowExportModal(true)}
-            className="relative flex items-center space-x-1.5 rounded-full bg-brand-blue px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-brand-blueHover active:scale-95 transition-all"
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-            <span>Review Notes</span>
-            {comments.length > 0 && (
-              <span className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-[10px] font-bold text-brand-blue">
-                {comments.length}
-              </span>
-            )}
-          </button>
+          <h1 className="text-base font-bold tracking-tight text-content-primary">
+            Design Kit
+          </h1>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="relative z-10 max-w-5xl mx-auto px-4 py-6 pb-32 space-y-8">
+      <main className="relative z-10 max-w-5xl w-full mx-auto px-4 py-6 pb-36 space-y-8 flex-1">
         {/* SECTION 0: LIVE PROPERTY TWEAKER TOOLBAR */}
         <section className="rounded-3xl border border-surface-border bg-surface-card/90 p-4 sm:p-6 shadow-sm backdrop-blur-xl space-y-4">
           <div className="flex items-center justify-between border-b border-surface-borderSubtle pb-3">
@@ -229,14 +196,34 @@ export const DesignKitView: React.FC<DesignKitViewProps> = ({
               <h2 className="text-sm font-bold text-content-primary">Isolated Sandbox Tweakers</h2>
               <span className="text-[11px] text-content-muted">(Affects preview only)</span>
             </div>
-            <button
-              onClick={handleResetTweaks}
-              className="flex items-center space-x-1 text-xs font-semibold text-content-muted hover:text-brand-blue transition-colors"
-              title="Reset sliders to defaults"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span>Reset</span>
-            </button>
+            <div className="flex items-center space-x-3">
+              {/* Sandbox Theme Toggle */}
+              <button
+                onClick={() => setSbTheme(sbTheme === 'light' ? 'dark' : 'light')}
+                className="flex items-center space-x-1.5 rounded-xl border border-surface-border bg-surface-card px-2.5 py-1 text-xs font-semibold text-content-primary shadow-xs hover:bg-surface-secondary active:scale-95 transition-all"
+                title={`Switch preview to ${sbTheme === 'light' ? 'Dark' : 'Light'} mode`}
+              >
+                {sbTheme === 'light' ? (
+                  <>
+                    <Moon className="h-3.5 w-3.5 text-indigo-500" />
+                    <span>Dark Mode</span>
+                  </>
+                ) : (
+                  <>
+                    <Sun className="h-3.5 w-3.5 text-amber-400" />
+                    <span>Light Mode</span>
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleResetTweaks}
+                className="flex items-center space-x-1 text-xs font-semibold text-content-muted hover:text-brand-blue transition-colors"
+                title="Reset sliders to defaults"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Reset</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
