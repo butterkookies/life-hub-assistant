@@ -12,6 +12,8 @@ import { SettingsSheet } from './components/SettingsSheet';
 import { LoginModal } from './components/LoginModal';
 import { IosInstallGuide } from './components/IosInstallGuide';
 import { PushNotificationModal } from './components/PushNotificationModal';
+import { DesignKitView } from './components/DesignKitView';
+import { Palette } from 'lucide-react';
 
 export const App: React.FC = () => {
   const { session, loading: authLoading, error: authError, login, logout } = useAuth();
@@ -37,14 +39,53 @@ export const App: React.FC = () => {
     return saved === 'dark' ? 'dark' : 'light';
   });
 
+  // Dynamic Theme & Status Bar Synchronization (fixes top bar color mismatch)
   useEffect(() => {
-    if (theme === 'dark') {
+    const isDark = theme === 'dark';
+    if (isDark) {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
+
+    // Immediately synchronize iOS Safari / PWA status bar meta and canvas background
+    const color = isDark ? '#090a0f' : '#f8f9fb';
+    const themeMeta = document.getElementById('app-theme-color') || document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) {
+      themeMeta.setAttribute('content', color);
+    }
+    document.documentElement.style.backgroundColor = color;
+    document.body.style.backgroundColor = color;
+    document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+
     localStorage.setItem('life_hub_theme', theme);
   }, [theme]);
+
+  // Interactive Design Kit Studio State (?view=design-kit or hash #design-kit)
+  const [isDesignKitView, setIsDesignKitView] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('view') === 'design-kit' || window.location.hash === '#design-kit';
+  });
+
+  const toggleDesignKitView = (active: boolean) => {
+    setIsDesignKitView(active);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (active) {
+        url.searchParams.set('view', 'design-kit');
+      } else {
+        url.searchParams.delete('view');
+        if (url.hash === '#design-kit') url.hash = '';
+      }
+      window.history.replaceState({}, '', url.toString());
+    }
+  };
+
+  const handleSendDesignKitFeedback = (feedbackText: string) => {
+    toggleDesignKitView(false);
+    sendMessage(feedbackText);
+  };
 
   const [agents, setAgents] = useState<Agent[]>([
     {
@@ -133,11 +174,32 @@ export const App: React.FC = () => {
     return <LoginModal onLogin={login} error={authError} />;
   }
 
-  // 3. Main Assistant Interface (Gemini iOS Layout + Moving Blue Gradient)
+  // 3. Interactive Design Kit Studio
+  if (isDesignKitView) {
+    return (
+      <DesignKitView
+        onBackToChat={() => toggleDesignKitView(false)}
+        onSendFeedbackToChat={handleSendDesignKitFeedback}
+        activeAppTheme={theme}
+      />
+    );
+  }
+
+  // 4. Main Assistant Interface (Gemini iOS Layout + Moving Blue Gradient)
   return (
     <div className="relative flex h-full flex-col bg-surface-bg text-content-primary overflow-hidden">
       {/* Ambient Moving Blue Gradient Canvas */}
       <div className="moving-gradient-canvas" aria-hidden="true" />
+
+      {/* Floating Design Kit Quick Switch Pill */}
+      <button
+        onClick={() => toggleDesignKitView(true)}
+        className="fixed bottom-24 right-3.5 sm:right-6 z-30 flex items-center space-x-1.5 rounded-full border border-surface-border bg-surface-card/90 px-3 py-1.5 text-xs font-semibold text-content-primary shadow-lg backdrop-blur-xl hover:bg-surface-secondary active:scale-95 transition-all"
+        title="Open Interactive Design Kit Studio"
+      >
+        <Palette className="h-3.5 w-3.5 text-brand-blue" />
+        <span>Design Kit</span>
+      </button>
 
       {/* Gemini Minimal Top Bar */}
       <Header
@@ -204,6 +266,7 @@ export const App: React.FC = () => {
         theme={theme}
         onToggleTheme={(t) => setTheme(t)}
         onOpenNotifications={() => setNotifModalOpen(true)}
+        onOpenDesignKit={() => toggleDesignKitView(true)}
         onLogout={logout}
       />
 

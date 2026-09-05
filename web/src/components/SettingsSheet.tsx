@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Sun,
   Moon,
@@ -7,6 +7,9 @@ import {
   Database,
   LogOut,
   ChevronRight,
+  RotateCcw,
+  Palette,
+  Loader2,
 } from 'lucide-react';
 
 interface SettingsSheetProps {
@@ -15,6 +18,7 @@ interface SettingsSheetProps {
   theme: 'light' | 'dark';
   onToggleTheme: (theme: 'light' | 'dark') => void;
   onOpenNotifications: () => void;
+  onOpenDesignKit?: () => void;
   onLogout: () => void;
   userEmail?: string;
   userName?: string;
@@ -26,10 +30,33 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
   theme,
   onToggleTheme,
   onOpenNotifications,
+  onOpenDesignKit,
   onLogout,
   userEmail = 'geronimojoan002@gmail.com',
   userName = 'Geronimo, Andrei John P.',
 }) => {
+  const [clearing, setClearing] = useState(false);
+
+  const handleHardRefresh = async () => {
+    setClearing(true);
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const reg of registrations) {
+          await reg.update();
+        }
+      }
+    } catch (err) {
+      console.warn('Cache clear error:', err);
+    }
+    // Hard reload
+    window.location.reload();
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -175,6 +202,68 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
                 </div>
                 <ChevronRight className="h-4 w-4 text-content-muted/70" />
               </button>
+            </div>
+          </div>
+
+          {/* Group: System & Tools */}
+          <div>
+            <div className="px-3 pb-1.5 text-[12px] font-semibold uppercase tracking-wider text-content-muted">
+              System & Tools
+            </div>
+            <div className="divide-y divide-surface-borderSubtle rounded-2xl border border-surface-border bg-surface-card shadow-2xs overflow-hidden">
+              {/* Hard Refresh Row */}
+              <button
+                onClick={handleHardRefresh}
+                disabled={clearing}
+                className="flex w-full items-center justify-between p-3.5 text-left hover:bg-surface-secondary/50 active:bg-surface-secondary/70 transition-colors disabled:opacity-60"
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500 text-white shadow-2xs shrink-0">
+                    {clearing ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="h-4 w-4" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-[14px] font-medium text-content-primary">
+                      {clearing ? 'Clearing Cache & Reloading...' : 'Force Reload & Clear Cache'}
+                    </div>
+                    <div className="text-[12px] text-content-secondary">
+                      Bypasses Service Worker and reloads fresh app
+                    </div>
+                  </div>
+                </div>
+                <span className="text-[12px] font-semibold text-brand-blue">
+                  {clearing ? 'Reloading' : 'Reload'}
+                </span>
+              </button>
+
+              {/* Design Kit Studio Shortcut */}
+              {onOpenDesignKit && (
+                <button
+                  onClick={() => {
+                    onOpenDesignKit();
+                    onClose();
+                  }}
+                  className="flex w-full items-center justify-between p-3.5 text-left hover:bg-surface-secondary/50 active:bg-surface-secondary/70 transition-colors"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-500 text-white shadow-2xs shrink-0">
+                      <Palette className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <div className="text-[14px] font-medium text-content-primary">
+                        Design Kit & UI Studio
+                      </div>
+                      <div className="text-[12px] text-content-secondary">
+                        Interactive sandbox, property tweakers & review
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-content-muted/70" />
+                </button>
+              )}
             </div>
           </div>
 
