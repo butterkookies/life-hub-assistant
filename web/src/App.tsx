@@ -59,6 +59,21 @@ export const App: React.FC = () => {
     document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
 
     localStorage.setItem('life_hub_theme', theme);
+
+    // Synchronize custom ambient moving gradient if configured in Design Kit
+    try {
+      const savedGrad = localStorage.getItem('life_hub_custom_gradient');
+      if (savedGrad) {
+        const { gradColor1, gradColor2, gradColor3, gradSpeed, gradBlur } = JSON.parse(savedGrad);
+        if (gradColor1) document.documentElement.style.setProperty('--gradient-glow-1', isDark ? `${gradColor1}40` : `${gradColor1}18`);
+        if (gradColor2) document.documentElement.style.setProperty('--gradient-glow-2', isDark ? `${gradColor2}38` : `${gradColor2}14`);
+        if (gradColor3) document.documentElement.style.setProperty('--gradient-glow-3', isDark ? `${gradColor3}30` : `${gradColor3}16`);
+        if (gradSpeed) document.documentElement.style.setProperty('--gradient-speed', `${gradSpeed}s`);
+        if (gradBlur) document.documentElement.style.setProperty('--gradient-blur', `${gradBlur}px`);
+      }
+    } catch {
+      // Ignore parse error
+    }
   }, [theme]);
 
   // Interactive Design Kit Studio State (?view=design-kit or hash #design-kit)
@@ -107,6 +122,21 @@ export const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
+
+  // User Profile Photo State (persisted in localStorage)
+  const [userPhoto, setUserPhoto] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('life_hub_user_avatar');
+  });
+
+  const handleUpdatePhoto = (photo: string | null) => {
+    setUserPhoto(photo);
+    if (photo) {
+      localStorage.setItem('life_hub_user_avatar', photo);
+    } else {
+      localStorage.removeItem('life_hub_user_avatar');
+    }
+  };
 
   // Native input refs for media triggering
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -181,6 +211,8 @@ export const App: React.FC = () => {
         onBackToChat={() => toggleDesignKitView(false)}
         onSendFeedbackToChat={handleSendDesignKitFeedback}
         activeAppTheme={theme}
+        userPhoto={userPhoto}
+        onUpdatePhoto={handleUpdatePhoto}
       />
     );
   }
@@ -210,6 +242,7 @@ export const App: React.FC = () => {
         onToggleDrawer={() => setDrawerOpen(true)}
         onOpenSettings={() => setSettingsSheetOpen(true)}
         isOnline={isOnline}
+        userPhoto={userPhoto}
       />
 
       {/* Main Spacious Conversation Stream */}
@@ -268,6 +301,8 @@ export const App: React.FC = () => {
         onOpenNotifications={() => setNotifModalOpen(true)}
         onOpenDesignKit={() => toggleDesignKitView(true)}
         onLogout={logout}
+        userPhoto={userPhoto}
+        onUpdatePhoto={handleUpdatePhoto}
       />
 
       {/* Modals */}

@@ -76,8 +76,8 @@ html, body {
   background: radial-gradient(ellipse 65% 55% at 50% 100%, var(--gradient-glow-1) 0%, transparent 70%),
               radial-gradient(ellipse 50% 40% at 20% 90%, var(--gradient-glow-2) 0%, transparent 65%),
               radial-gradient(ellipse 45% 45% at 80% 85%, var(--gradient-glow-3) 0%, transparent 65%);
-  filter: blur(45px);
-  animation: gradientOrbMove 14s ease-in-out infinite alternate;
+  filter: blur(var(--gradient-blur, 45px));
+  animation: gradientOrbMove var(--gradient-speed, 14s) ease-in-out infinite alternate;
   will-change: transform, opacity;
 }
 

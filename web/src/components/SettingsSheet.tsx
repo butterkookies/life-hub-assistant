@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Sun,
   Moon,
@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Palette,
   Loader2,
+  Camera,
 } from 'lucide-react';
 
 interface SettingsSheetProps {
@@ -22,6 +23,8 @@ interface SettingsSheetProps {
   onLogout: () => void;
   userEmail?: string;
   userName?: string;
+  userPhoto?: string | null;
+  onUpdatePhoto?: (photo: string | null) => void;
 }
 
 export const SettingsSheet: React.FC<SettingsSheetProps> = ({
@@ -34,8 +37,24 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
   onLogout,
   userEmail = 'geronimojoan002@gmail.com',
   userName = 'Geronimo, Andrei John P.',
+  userPhoto = null,
+  onUpdatePhoto,
 }) => {
   const [clearing, setClearing] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onUpdatePhoto) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          onUpdatePhoto(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleHardRefresh = async () => {
     setClearing(true);
@@ -88,20 +107,60 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
 
         {/* Scrollable Grouped Content */}
         <div className="flex-1 overflow-y-auto px-4 py-2 space-y-6 pb-safe no-scrollbar">
-          {/* Apple ID Style User Profile Row */}
+          {/* Apple ID Style User Profile Row with Custom Photo Support */}
           <div className="rounded-2xl border border-surface-border bg-surface-card p-4 shadow-2xs transition-transform">
             <div className="flex items-center space-x-3.5">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-tr from-brand-blue to-brand-indigo text-white font-semibold text-lg shadow-xs shrink-0 select-none">
-                <span>AJ</span>
+              <div className="relative group shrink-0">
+                <input
+                  type="file"
+                  ref={photoInputRef}
+                  onChange={handlePhotoChange}
+                  accept="image/*"
+                  className="hidden"
+                />
+                <button
+                  onClick={() => photoInputRef.current?.click()}
+                  className="relative flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-tr from-brand-blue to-brand-indigo text-white font-semibold text-lg shadow-xs overflow-hidden hover:opacity-90 active:scale-95 transition-all select-none"
+                  title="Tap to change profile picture"
+                >
+                  {userPhoto ? (
+                    <img src={userPhoto} alt={userName} className="h-full w-full object-cover" />
+                  ) : (
+                    <span>AJ</span>
+                  )}
+                  {/* Subtle camera overlay on hover/press */}
+                  <div className="absolute inset-0 bg-black/35 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Camera className="h-4 w-4 text-white" />
+                  </div>
+                </button>
               </div>
+
               <div className="flex-1 min-w-0">
-                <h3 className="text-[16px] font-semibold text-content-primary tracking-tight truncate">
-                  {userName}
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[16px] font-semibold text-content-primary tracking-tight truncate">
+                    {userName}
+                  </h3>
+                  <button
+                    onClick={() => photoInputRef.current?.click()}
+                    className="text-[12px] font-semibold text-brand-blue hover:text-brand-blueHover"
+                  >
+                    {userPhoto ? 'Change' : 'Add Photo'}
+                  </button>
+                </div>
                 <p className="text-[13px] text-content-secondary truncate">{userEmail}</p>
-                <div className="mt-1 flex items-center space-x-1.5 text-[12px] text-emerald-600 dark:text-emerald-400 font-medium">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Workspace Connected</span>
+                <div className="mt-1 flex items-center justify-between">
+                  <div className="flex items-center space-x-1.5 text-[12px] text-emerald-600 dark:text-emerald-400 font-medium">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Workspace Connected</span>
+                  </div>
+                  {userPhoto && onUpdatePhoto && (
+                    <button
+                      onClick={() => onUpdatePhoto(null)}
+                      className="text-[11px] font-medium text-red-500 hover:text-red-600 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -157,7 +216,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
                     <div className="text-[12px] text-content-secondary">Official Integration Active</div>
                   </div>
                 </div>
-                <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/50 dark:border-emerald-800/50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                <span className="text-[13px] font-medium text-emerald-600 dark:text-emerald-400">
                   Synced
                 </span>
               </div>

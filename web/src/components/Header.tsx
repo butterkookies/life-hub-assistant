@@ -16,6 +16,7 @@ interface HeaderProps {
   onToggleDrawer: () => void;
   onOpenSettings: () => void;
   isOnline: boolean;
+  userPhoto?: string | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -26,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleDrawer,
   onOpenSettings,
   isOnline,
+  userPhoto,
 }) => {
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const currentAgent = agents.find((a) => a.id === selectedAgentId) || agents[0];
@@ -120,11 +122,15 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Profile Avatar -> Opens SettingsSheet */}
         <button
           onClick={onOpenSettings}
-          className="relative flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-tr from-brand-blue to-brand-cyan text-white text-xs font-bold shadow-sm transition-transform hover:scale-105 active:scale-95 ring-2 ring-transparent focus:ring-brand-blue"
+          className="relative flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-tr from-brand-blue to-brand-cyan text-white text-xs font-bold shadow-sm transition-transform hover:scale-105 active:scale-95 ring-2 ring-transparent focus:ring-brand-blue overflow-hidden"
           title="Settings & Profile"
           aria-label="Settings and Profile"
         >
-          <span>AJ</span>
+          {userPhoto ? (
+            <img src={userPhoto} alt="User Profile" className="h-full w-full object-cover" />
+          ) : (
+            <span>AJ</span>
+          )}
           <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-surface-bg bg-emerald-500" />
         </button>
       </div>
