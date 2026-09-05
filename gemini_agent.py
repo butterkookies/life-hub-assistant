@@ -17,8 +17,22 @@ from notion_service import notion_service
 
 logger = logging.getLogger("gemini_agent")
 
-SYSTEM_INSTRUCTION = """You are Andrei's dedicated personal AI assistant connected to his Notion workspace (Life Hub) and Notion Calendar.
-You communicate via Telegram and execute actions directly in his Notion workspace.
+SYSTEM_INSTRUCTION = """You are Andrei's dedicated personal AI assistant connected to his Notion workspace and Notion Calendar.
+You communicate through the Life Hub web app, with Telegram as an optional secondary interface.
+
+Workspace routing rules (apply even if earlier conversation messages use the old layout):
+- The canonical home is Life Hub Manager, page 3be27102528781969765dedd1b639a0b.
+- The outer Life Hub page is legacy. Never choose it merely because its name matches the app.
+- Use get_workspace_context to read the authoritative Tasks/Projects IDs and their current schemas.
+- Tasks and Projects under Manager > System Databases are the master records. Never pick the first search match named Tasks or Projects. Search results include parent IDs and canonical/legacy flags.
+- For "add/create a task", "gawan mo ng tasks", reminders, and actionable project work, call create_task. It saves actual master Tasks rows with a Projects relation and Do Date when provided. Markdown/checklists are not saved tasks.
+- For "create a project" / "gawa ng project", always call create_project, even if the user does not explicitly ask for a database. It creates a master Projects entry and a filtered linked Tasks view inside the project page. All project tasks live in the shared master Tasks database.
+- A project is a page AND a Projects database entry. Do not substitute create_new_page or a markdown project outline for create_project.
+- Use separate databases only for specialized project data (such as assets or experiments), or when the user explicitly requests a separate database. Never create a new Tasks source for each project by default.
+- If project setup is partial, report which step failed and use ensure_project_tasks_view with the existing project ID. Never recreate the project to repair its view.
+- A database write must respect its actual schema. Inspect get_database_schema before generic writes. Do not invent Priority, Status, or dates on databases that lack those writable columns; do not set computed formulas or rollups.
+- Return the exact saved item link and destination only after a successful tool result. Errors, partial results, or generated text are not proof of completion. After an uncertain write error, inspect the destination before retrying to avoid duplicates.
+- If multiple existing projects match, ask which one; never guess. Distinguish drafting a plan from the user's request to save tasks.
 
 Your capabilities:
 1. Scan Notion Calendar / Schedule: When Andrei asks what is on his schedule, calendar, or tasks for today/this week, use `get_calendar_schedule` to retrieve all scheduled tasks, deadlines, and events.
@@ -27,17 +41,15 @@ Your capabilities:
 4. Query databases (Tasks, Projects, Schedule, Workstreams, etc.).
 5. Create new tasks, project entries, or calendar items with due dates and properties.
 6. Update task statuses (e.g. mark as Done, in progress), change dates, or check archive boxes.
-7. Append quick thoughts, bullet points, or checklist items to existing pages.
+7. Append notes or bullet points to existing pages; save actionable tasks as database rows.
 8. Create new standalone pages.
 9. Create actual Notion databases (with custom columns like Status, Priority, Due Date, and view layouts like Table, List, Board, Gallery, Calendar) under any project or parent page using `create_database`.
 
 Formatting & Style Guidelines:
 - Format your replies cleanly using Markdown (*bold*, _italic_, `monospace`, bullet points, links, emojis).
 - When a user asks about today's schedule, scan the calendar/tasks for today's date and present a crisp breakdown of completed vs pending items.
-- When Andrei asks to create a new project with a database (e.g. "create a project named X and a database inside it to track tasks in list/board/gallery/table view"):
-  1. First create the project page using `create_new_page`.
-  2. Then immediately create the database inside that project page using `create_database`, setting the requested `view_type` ('table', 'list', 'board', 'gallery', 'calendar', 'timeline').
-  3. Do NOT merely write a checklist in markdown or bullet points when an actual Notion database is requested.
+- Project task trackers use create_project and the shared Tasks view, in the requested layout.
+- Do NOT merely write a checklist in markdown or bullet points when tasks or a database are requested.
 - Keep answers helpful, concise, and confirm the exact title and links of created/modified items.
 - If processing a voice note, briefly acknowledge the user's spoken intent and confirm the action taken.
 
@@ -65,6 +77,46 @@ def search_notion(query: str = "", filter_type: str = "") -> str:
     except Exception as e:
         return f"Error searching Notion: {str(e)}"
 
+
+def get_workspace_context() -> str:
+    """Read canonical Life Hub Manager destinations and live master Tasks/Projects schemas."""
+    try:
+        return json.dumps(notion_service.get_workspace_context(), indent=2)
+    except Exception as exc:
+        return f"Error reading workspace context: {exc}"
+
+
+def get_database_schema(database_id: str) -> str:
+    """Inspect real column names, property types and options before a generic database write."""
+    try:
+        return json.dumps(notion_service.get_database_schema(database_id), indent=2)
+    except Exception as exc:
+        return f"Error reading database schema: {exc}"
+
+
+def create_task(title: str, due_date: str = "", project_id: str = "", content: str = "") -> str:
+    """Save an actual row in Manager's master Tasks. due_date is YYYY-MM-DD; project_id must be a master Projects entry. Never substitute page checkboxes."""
+    try:
+        return json.dumps(notion_service.create_task(title, due_date, project_id, content), indent=2)
+    except Exception as exc:
+        return f"Task creation not confirmed: {exc}. Inspect the destination before retrying an uncertain write."
+
+
+def create_project(title: str, content: str = "", view_type: str = "table") -> str:
+    """Create/reuse a master Projects entry AND its filtered shared Tasks view. Use for every new project, even when no database was explicitly requested."""
+    try:
+        return json.dumps(notion_service.create_project(title, content, view_type), indent=2)
+    except Exception as exc:
+        return f"Project creation not confirmed: {exc}. Inspect Projects before retrying an uncertain write."
+
+
+def ensure_project_tasks_view(project_id: str, view_type: str = "table") -> str:
+    """Create/reuse a filtered shared Tasks view inside an existing master project, including repairing partial setup."""
+    try:
+        return json.dumps(notion_service.ensure_project_tasks_view(project_id, view_type), indent=2)
+    except Exception as exc:
+        return f"Project task view not confirmed: {exc}"
+
 def get_page_content(page_id: str) -> str:
     """Read the full text and block contents of a Notion page given its UUID."""
     try:
@@ -83,10 +135,13 @@ def query_database(database_id: str, page_size: int = 20) -> str:
 
 def create_database_item(database_id: str, title: str, title_property_name: str = "Name", properties_json: str = "{}", content: str = "") -> str:
     """Create a new item in a Notion database (e.g. task, project, note).
-    properties_json can contain custom properties like {"Priority": "High Priority", "Status": "In progress", "Do Date": "2026-08-20", "Projects": ["<project_id>"]}.
+    Inspect get_database_schema first. Prefer create_task for tasks and create_project for projects.
+    For master Tasks, properties_json can contain {"Status": "In progress", "Do Date": "2026-08-20", "Projects": ["<project_id>"]}.
     """
     try:
         props = json.loads(properties_json) if properties_json and properties_json != "{}" else {}
+        if database_id.replace("-", "") in {notion_service.PROJECTS_DATABASE_ID, notion_service.PROJECTS_DATA_SOURCE_ID}:
+            return "Use create_project to create the Projects entry together with its filtered shared Tasks view."
         res = notion_service.create_database_item(
             database_id=database_id,
             title=title,
@@ -110,7 +165,7 @@ def update_page_properties(page_id: str, properties_json: str) -> str:
         return f"Error updating page properties: {str(e)}"
 
 def append_to_page(page_id: str, text: str, block_type: str = "paragraph") -> str:
-    """Append text to an existing Notion page. block_type can be 'paragraph', 'bulleted_list_item', 'heading_2', or 'to_do'."""
+    """Append notes to an existing Notion page. Use paragraph, bulleted_list_item or heading_2. For actionable tasks use create_task, not checkboxes."""
     try:
         res = notion_service.append_to_page(page_id=page_id, text=text, block_type=block_type)
         return json.dumps(res, indent=2)
@@ -158,6 +213,11 @@ def create_database(
         return f"Error creating database: {str(e)}"
 
 TOOLS = [
+    get_workspace_context,
+    get_database_schema,
+    create_task,
+    create_project,
+    ensure_project_tasks_view,
     get_calendar_schedule,
     search_notion,
     get_page_content,
@@ -225,7 +285,7 @@ class GeminiNotionAgent:
                 except Exception:
                     pass
 
-                reply_text = response.text or "✅ Action completed in your Notion workspace."
+                reply_text = response.text or "No completion summary was returned. Check the Notion destination before retrying the request."
                 
                 # Append discreet notification tag if served by a fallback model
                 if tier_index > 0:

@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from pywebpush import WebPushException, webpush
+from py_vapid import Vapid
 from config import settings
 from server.database import get_db
 
@@ -25,8 +26,13 @@ class WebPushService:
             return None
         return settings.WEB_PUSH_VAPID_PUBLIC_KEY
 
-    def is_subscribed(self, user_id: str) -> bool:
+    def is_subscribed(self, user_id: str, endpoint: Optional[str] = None) -> bool:
         with get_db() as db:
+            if endpoint is not None:
+                return db.execute(
+                    "SELECT 1 FROM push_subscriptions WHERE user_id = ? AND endpoint = ?",
+                    (user_id, endpoint),
+                ).fetchone() is not None
             row = db.execute(
                 "SELECT COUNT(id) as count FROM push_subscriptions WHERE user_id = ?",
                 (user_id,)
@@ -87,6 +93,12 @@ class WebPushService:
         if not rows:
             return 0
 
+        # The bundled generator stores PEM; pywebpush's string path expects base64
+        # DER/raw instead. Pass a parsed Vapid object to support both formats.
+        private_key = settings.WEB_PUSH_VAPID_PRIVATE_KEY
+        vapid_key = (Vapid.from_pem(private_key.encode("utf-8"))
+                     if private_key.startswith("-----BEGIN") else Vapid.from_string(private_key))
+
         payload = json.dumps({
             "title": title,
             "body": body,
@@ -114,8 +126,11 @@ class WebPushService:
                 webpush(
                     subscription_info=sub_info,
                     data=payload,
-                    vapid_private_key=settings.WEB_PUSH_VAPID_PRIVATE_KEY,
-                    vapid_claims=vapid_claims
+                    vapid_private_key=vapid_key,
+                    # pywebpush mutates aud/exp. Each provider needs fresh claims.
+                    vapid_claims=dict(vapid_claims),
+                    ttl=21600,
+                    timeout=10,
                 )
                 sent_count += 1
             except WebPushException as ex:

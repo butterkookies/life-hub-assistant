@@ -4,6 +4,35 @@
 
 ---
 
+## Notion routing update (2026-09-05)
+
+Life Hub Manager is now a workspace-level page (`3be27102528781969765dedd1b639a0b`).
+The old Life Hub is retained separately for reference; its Tasks/Projects databases are legacy destinations.
+
+- Canonical Tasks database: `d1527102528783299cac81b9d565b99b`; data source: `96927102528782d9bed487a7322ac310`.
+- Canonical Projects database: `ba427102528782efbdce815b505396a2`; data source: `59827102528783dbb9e807b71c738058`.
+- `create_task` writes master Tasks rows with optional `Do Date` and `Projects` relation. The current Tasks schema has no Priority column.
+- `create_project` creates a master Projects entry and a filtered linked Tasks view inside it. Every project shares the master task source; separate databases are reserved for specialized data or explicit requests.
+- `ensure_project_tasks_view` repairs partial view setup without recreating the project. Repeating a project name reuses an existing active exact match; duplicate matches require explicit selection.
+- `get_workspace_context` and `get_database_schema` expose canonical IDs and live schemas. Generic database creation validates requested fields and uses a data-source parent; failed writes never retry with fields removed.
+- The Notion SDK must be `>=3.1.0,<4` for linked view creation. See the [Notion views API](https://developers.notion.com/guides/data-apis/working-with-views).
+- Older architecture descriptions below may still use "Life Hub" as the app name. Do not infer a Notion write destination from that name.
+
+Verification covers routing, legacy destination rejection, property preservation, pagination, and partial project recovery in `tests/test_notion_workspace.py`. A live check also verified creation, readback, view reuse, and cleanup of temporary project/task records.
+
+Remaining recommendations: durable operation IDs to prevent duplicate writes across model retries; persisted tool-result receipts alongside chat history; migration of legacy checklists only after reviewing their intended projects and dates. These are not implemented by the routing update.
+
+### Push notifications on the hosted app
+
+The user-facing deployment is `https://life-hub-assistant.onrender.com`. Local server settings do not configure Render.
+Set `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and `WEB_PUSH_CONTACT` in the Render service environment. Keep the matching key pair stable across deployments; never commit private keys. The private key may be PEM (including escaped newlines) or base64 DER/raw. The server parses PEM before calling pywebpush and uses separate claims for each device's push provider.
+
+Each device must subscribe through Settings > Daily Briefing & Web Push. Windows users should open the hosted app in Chrome or Edge; iPhone users must add the HTTPS app to their Home Screen and open that installed app before granting notification permission. Device status is checked against the current browser subscription, rather than another device's registration. Send Test Notification sends to all registered devices; zero accepted sends is reported as failure. Provider acceptance does not prove display on the device.
+
+The current scheduler runs inside the web server and subscriptions live in SQLite. If using Render's free service configuration, service sleep interrupts scheduling and ephemeral storage can lose subscriptions on restart/deployment. Reliable unattended briefings require a persistent database and an always-running scheduler or an external scheduling service.
+
+---
+
 ## 📑 Table of Contents
 
 1. [Executive Summary & Core Value](#1-executive-summary--core-value)

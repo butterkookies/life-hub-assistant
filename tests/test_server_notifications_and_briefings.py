@@ -12,6 +12,7 @@ from server.database import get_db, init_db
 from server.main import create_app
 from server.services.briefing_service import briefing_service
 from server.services.web_push_service import web_push_service
+from py_vapid import Vapid
 import telegram_bot
 
 class ServerNotificationsAndBriefingsTests(unittest.IsolatedAsyncioTestCase):
@@ -107,6 +108,39 @@ class ServerNotificationsAndBriefingsTests(unittest.IsolatedAsyncioTestCase):
         # Different channel or date should not be marked delivered
         self.assertFalse(briefing_service.is_delivered(date_str, "email", recipient))
         self.assertFalse(briefing_service.is_delivered("2026-09-05", channel, recipient))
+
+    def test_device_status_does_not_use_another_devices_subscription(self):
+        web_push_service.save_subscription('andrei-main', 'https://push.example/desktop', 'key', 'auth')
+        desktop = self.client.post('/api/notifications/device-status', json={'endpoint': 'https://push.example/desktop'}, headers=self.auth_headers)
+        phone = self.client.post('/api/notifications/device-status', json={'endpoint': 'https://push.example/phone'}, headers=self.auth_headers)
+        self.assertTrue(desktop.json()['subscribed'])
+        self.assertFalse(phone.json()['subscribed'])
+
+    def test_pem_push_key_and_separate_provider_claims(self):
+        key = Vapid()
+        key.generate_keys()
+        web_push_service.save_subscription('andrei-main', 'https://push.example/desktop', 'key', 'auth')
+        web_push_service.save_subscription('andrei-main', 'https://other.example/phone', 'key', 'auth')
+        calls = []
+
+        def fake_send(**kwargs):
+            self.assertIsInstance(kwargs['vapid_private_key'], Vapid)
+            self.assertNotIn('aud', kwargs['vapid_claims'])
+            self.assertGreater(kwargs['ttl'], 0)
+            self.assertEqual(kwargs['timeout'], 10)
+            kwargs['vapid_claims']['aud'] = 'provider-specific-audience'
+            calls.append(kwargs)
+
+        with patch.dict(os.environ, {'WEB_PUSH_VAPID_PRIVATE_KEY': key.private_pem().decode()}), patch('server.services.web_push_service.webpush', side_effect=fake_send):
+            self.assertEqual(web_push_service.send_notification('andrei-main', 'Test', 'Test notification'), 2)
+        self.assertEqual(len(calls), 2)
+        self.assertIsNot(calls[0]['vapid_claims'], calls[1]['vapid_claims'])
+
+    def test_zero_device_test_is_not_reported_as_success(self):
+        response = self.client.post('/api/notifications/test', headers=self.auth_headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['success'])
+        self.assertEqual(response.json()['delivered_devices'], 0)
 
     @patch("gemini_agent.gemini_agent.generate_daily_briefing")
     async def test_dispatch_briefing_creates_conversation_message(self, mock_gen_briefing):

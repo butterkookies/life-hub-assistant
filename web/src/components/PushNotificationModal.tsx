@@ -16,22 +16,60 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
 }) => {
   const [subscribed, setSubscribed] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
+  const [configured, setConfigured] = useState(false);
+  const [publicKey, setPublicKey] = useState(vapidPublicKey);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const isPushSupported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window;
-  const isIos = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent);
-  const isStandalone = typeof window !== 'undefined' && ((window.navigator as any).standalone || window.matchMedia('(display-mode: standalone)').matches);
+  const isPushSupported = typeof window !== 'undefined' && window.isSecureContext && 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
+  const isIos = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  const isStandalone = typeof window !== 'undefined' && ((window.navigator as Navigator & { standalone?: boolean }).standalone || window.matchMedia('(display-mode: standalone)').matches);
 
   useEffect(() => {
-    if (isOpen) {
-      api.notifications.getStatus().then((res) => {
-        setSubscribed(res.subscribed);
-      }).catch(() => {});
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+    let cancelled = false;
+    setChecking(true);
+    setError(null);
+    setTestResult(null);
+    setSubscribed(false);
+    setConfigured(false);
+    const refresh = async () => {
+      try {
+        const status = await api.notifications.getStatus();
+        const registration = isPushSupported ? await navigator.serviceWorker.getRegistration() : undefined;
+        const subscription = registration ? await registration.pushManager.getSubscription() : null;
+        const deviceStatus = subscription ? await api.notifications.getDeviceStatus(subscription.endpoint) : null;
+        if (!cancelled) {
+          setConfigured(status.configured);
+          setPublicKey(status.vapid_public_key);
+          setSubscribed(Boolean(deviceStatus?.subscribed && Notification.permission === 'granted'));
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not check this device. Close and reopen notifications to retry.');
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    };
+    void refresh();
+    return () => { cancelled = true; };
+  }, [isOpen, isPushSupported]);
 
   if (!isOpen) return null;
+
+  const readyWorker = async (): Promise<ServiceWorkerRegistration> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Notification setup is still loading. Reload the app and try again.')), 10000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   const urlBase64ToUint8Array = (base64String: string) => {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -54,26 +92,28 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
         throw new Error('Web Push is not supported on this browser.');
       }
 
-      if (!vapidPublicKey) {
-        throw new Error('VAPID public key not configured on server.');
+      if (!configured || !publicKey) {
+        throw new Error('Push notifications are not configured on this server yet.');
       }
 
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
-        throw new Error('Notification permission was denied.');
+        throw new Error(permission === 'denied'
+          ? 'Notifications are blocked. Allow them in your browser or device notification settings, then try again.'
+          : 'Permission was not granted. Tap Enable again when you are ready.');
       }
 
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
+      const reg = await readyWorker();
+      const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
       });
 
       await api.notifications.subscribe(sub);
       setSubscribed(true);
       setTestResult('✅ Notifications enabled successfully!');
-    } catch (err: any) {
-      setError(err.message || 'Failed to subscribe to push notifications.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to subscribe to push notifications.');
     } finally {
       setLoading(false);
     }
@@ -83,7 +123,7 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
     setError(null);
     setLoading(true);
     try {
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await readyWorker();
       const sub = await reg.pushManager.getSubscription();
       if (sub) {
         await api.notifications.unsubscribe(sub);
@@ -91,8 +131,8 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
       }
       setSubscribed(false);
       setTestResult('Notifications disabled.');
-    } catch (err: any) {
-      setError(err.message || 'Failed to disable notifications.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to disable notifications.');
     } finally {
       setLoading(false);
     }
@@ -104,9 +144,12 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
     setTestResult(null);
     try {
       const res = await api.notifications.test();
-      setTestResult(`Test sent to ${res.delivered_devices} device(s)!`);
-    } catch (err: any) {
-      setError(err.message || 'Test dispatch failed.');
+      if (!res.success || res.delivered_devices === 0) {
+        throw new Error('No test notifications were sent. Enable this device again, or check the server push settings.');
+      }
+      setTestResult(`Test sent to ${res.delivered_devices} device(s). Check your notifications.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Test dispatch failed.');
     } finally {
       setLoading(false);
     }
@@ -114,22 +157,22 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
-      <div className="w-full max-w-sm rounded-3xl border border-notion-border bg-notion-card p-6 shadow-notion-float animate-in fade-in zoom-in-95 duration-200">
+      <div role="dialog" aria-modal="true" aria-labelledby="push-notification-title" className="w-full max-w-sm rounded-3xl border border-notion-border bg-notion-card p-6 shadow-notion-float animate-in fade-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between pb-3 border-b border-notion-borderSubtle">
           <div className="flex items-center space-x-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-notion-blueLight text-notion-blue">
               <Bell className="h-4 w-4" />
             </div>
-            <h3 className="text-sm font-semibold text-notion-text">Web Push & Briefings</h3>
+            <h3 id="push-notification-title" className="text-sm font-semibold text-notion-text">Web Push & Briefings</h3>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-notion-secondary hover:bg-notion-paper">
+          <button onClick={onClose} aria-label="Close notifications" className="p-1 rounded-lg text-notion-secondary hover:bg-notion-paper">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="mt-4 space-y-3.5 text-xs text-notion-text">
           <p className="text-notion-secondary leading-relaxed">
-            Receive morning briefings and health alerts directly on your device lock screen.
+            Receive morning briefings on your device. Enable notifications separately on your computer and iPhone.
           </p>
 
           {isIos && !isStandalone && (
@@ -141,23 +184,30 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
             </div>
           )}
 
+          {!isPushSupported && !(isIos && !isStandalone) && (
+            <p className="text-notion-secondary">Open the HTTPS app in a browser that supports push notifications, such as Chrome, Edge, or Safari.</p>
+          )}
+          {!checking && !configured && (
+            <p className="text-notion-secondary">Push notifications need to be configured on the server before this device can subscribe.</p>
+          )}
+
           {error && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs text-red-800">
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs text-red-800">
               {error}
             </div>
           )}
 
           {testResult && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-800">
+            <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-800">
               {testResult}
             </div>
           )}
 
           <div className="rounded-2xl bg-notion-bg p-3.5 border border-notion-borderSubtle space-y-2">
             <div className="flex items-center justify-between">
-              <span className="font-medium text-notion-text">Push Notification Status</span>
+              <span className="font-medium text-notion-text">This Device</span>
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${subscribed ? 'bg-emerald-100 text-emerald-800' : 'bg-notion-paper text-notion-secondary'}`}>
-                {subscribed ? 'Active' : 'Disabled'}
+                {checking ? 'Checking…' : subscribed ? 'Active' : 'Disabled'}
               </span>
             </div>
             <p className="text-[11px] text-notion-muted">
@@ -188,7 +238,7 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
             ) : (
               <button
                 onClick={handleSubscribe}
-                disabled={loading || !isPushSupported}
+                disabled={loading || checking || !configured || !isPushSupported || Boolean(isIos && !isStandalone)}
                 className="w-full flex items-center justify-center space-x-1.5 rounded-xl bg-notion-blue py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-notion-blueHover transition-colors disabled:opacity-50"
               >
                 <Bell className="h-4 w-4" />

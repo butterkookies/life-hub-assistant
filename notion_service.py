@@ -3,13 +3,27 @@ import logging
 import math
 from datetime import date
 from typing import Dict, Any, List, Optional
+from urllib.parse import unquote
 from notion_client import Client
+from notion_client.errors import APIResponseError
 from config import settings
 from image_models import AttachmentResult, TreadmillScan, WorkoutUpsertResult
 
 logger = logging.getLogger("notion_service")
 
 class NotionService:
+    ROOT_PAGE_ID = "3be27102528781969765dedd1b639a0b"
+    TASKS_DATABASE_ID = "d1527102528783299cac81b9d565b99b"
+    TASKS_DATA_SOURCE_ID = "96927102528782d9bed487a7322ac310"
+    PROJECTS_DATABASE_ID = "ba427102528782efbdce815b505396a2"
+    PROJECTS_DATA_SOURCE_ID = "59827102528783dbb9e807b71c738058"
+    LEGACY_DESTINATIONS = {
+        "3b627102528781b988f2f1133532696f",  # Outer Life Hub page
+        "a6494cb1b0994c41897a6ffb6b4a476a",  # Legacy Tasks database
+        "e4c4941ceaff49f4b7738d19165955d1",  # Legacy Tasks data source
+        "bbcdbba6e6064de09d75b11e1caae66a",  # Legacy Projects database
+        "c63a416028274bc5a599e08d37bd3949",  # Legacy Projects data source
+    }
     HEALTH_LOG_DATABASE_ID = "3c327102528781669c3cc7d7acfaa2a4"
     HEALTH_LOG_DATA_SOURCE_ID = "3c327102528781ab8777000b115b3f54"
     WORKOUT_PROPERTY_MAP = {
@@ -33,10 +47,56 @@ class NotionService:
                 raise ValueError("NOTION_API_KEY is not set in environment or .env file.")
             self.client = Client(auth=settings.NOTION_API_KEY)
 
+    def _check_destination(self, entity_id: str) -> None:
+        if entity_id.replace("-", "") in self.LEGACY_DESTINATIONS:
+            raise ValueError("This is a legacy Life Hub destination. Use Life Hub Manager and its master databases.")
+
+    def _paginate(self, endpoint, **params):
+        """Read all pages; a failed request must not masquerade as an empty result."""
+        while True:
+            response = endpoint(**params)
+            yield from response.get("results", [])
+            if not response.get("has_more"):
+                break
+            params["start_cursor"] = response["next_cursor"]
+
+    def _resolve_data_source(self, entity_id: str) -> str:
+        clean_id = entity_id.replace("-", "")
+        if clean_id in self.KNOWN_DATA_SOURCES:
+            return self.KNOWN_DATA_SOURCES[clean_id]
+        if clean_id in self.KNOWN_DATA_SOURCES.values():
+            return clean_id
+        try:
+            source = self.client.data_sources.retrieve(data_source_id=clean_id)
+            return source["id"].replace("-", "")
+        except APIResponseError as exc:
+            if exc.code != "object_not_found":
+                raise
+        database = self.client.databases.retrieve(database_id=clean_id)
+        sources = database.get("data_sources", [])
+        if len(sources) != 1:
+            raise ValueError("Database has zero or multiple data sources; specify the exact data_source_id.")
+        return sources[0]["id"].replace("-", "")
+
+    def get_database_schema(self, database_id: str) -> Dict[str, Any]:
+        self._ensure_client()
+        source_id = self._resolve_data_source(database_id)
+        source = self.client.data_sources.retrieve(data_source_id=source_id)
+        return {"data_source_id": source_id, "properties": source["properties"], "parent": source.get("parent")}
+
+    def get_workspace_context(self) -> Dict[str, Any]:
+        return {
+            "root": {"id": self.ROOT_PAGE_ID, "title": "Life Hub Manager"},
+            "tasks": {"database_id": self.TASKS_DATABASE_ID, **self.get_database_schema(self.TASKS_DATA_SOURCE_ID)},
+            "projects": {"database_id": self.PROJECTS_DATABASE_ID, **self.get_database_schema(self.PROJECTS_DATA_SOURCE_ID)},
+            "task_policy": "Create rows in master Tasks; relate Projects. Project pages contain filtered linked views of these same rows.",
+            "legacy_destinations": sorted(self.LEGACY_DESTINATIONS),
+        }
+
     def search_workspace(self, query: str = "", filter_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """Search pages and databases across the workspace."""
         self._ensure_client()
-        params: Dict[str, Any] = {"page_size": 20}
+        params: Dict[str, Any] = {"page_size": 100}
         if query:
             params["query"] = query
         
@@ -45,15 +105,8 @@ class NotionService:
         elif filter_type in ["database", "data_source"]:
             params["filter"] = {"value": "data_source", "property": "object"}
 
-        try:
-            response = self.client.search(**params)
-        except Exception:
-            # Fallback without filter if filter rejected by Notion API version
-            params.pop("filter", None)
-            response = self.client.search(**params)
-
         results = []
-        for item in response.get("results", []):
+        for item in self._paginate(self.client.search, **params):
             obj_type = item.get("object")
             item_id = item.get("id")
             title = "Untitled"
@@ -78,10 +131,17 @@ class NotionService:
                 "data_source_id": item_id if obj_type == "data_source" else None,
                 "type": obj_type,
                 "title": title or "Untitled",
+                "parent": parent,
+                "in_trash": item.get("in_trash", False),
+                "is_legacy_destination": (item_id or "").replace("-", "") in self.LEGACY_DESTINATIONS,
+                "is_canonical": (item_id or "").replace("-", "") in {
+                    self.ROOT_PAGE_ID, self.TASKS_DATABASE_ID, self.TASKS_DATA_SOURCE_ID,
+                    self.PROJECTS_DATABASE_ID, self.PROJECTS_DATA_SOURCE_ID,
+                },
                 "url": item.get("url"),
                 "last_edited_time": item.get("last_edited_time")
             })
-        return results
+        return sorted(results, key=lambda item: (not item["is_canonical"], item["is_legacy_destination"]))
 
     def get_page_content(self, page_id: str) -> Dict[str, Any]:
         """Retrieve page metadata and all child text blocks formatted as markdown."""
@@ -100,10 +160,10 @@ class NotionService:
                 break
 
         # Fetch child blocks
-        blocks_resp = self.client.blocks.children.list(block_id=clean_id, page_size=100)
+        blocks = list(self._paginate(self.client.blocks.children.list, block_id=clean_id, page_size=100))
         lines = [f"# {title}\n"]
         
-        for block in blocks_resp.get("results", []):
+        for block in blocks:
             b_type = block.get("type")
             b_data = block.get(b_type, {})
             rich_texts = b_data.get("rich_text", [])
@@ -130,11 +190,15 @@ class NotionService:
                 lines.append(f"> {text_content}")
             elif b_type == "code":
                 lines.append(f"```\n{text_content}\n```")
+            elif b_type in ("child_page", "child_database"):
+                lines.append(f"[{b_type}: {b_data.get('title', 'Untitled')}] ({block['id']})")
 
         return {
             "id": page.get("id"),
             "title": title,
             "url": page.get("url"),
+            "parent": page.get("parent"),
+            "children": [{"id": b["id"], "type": b["type"], "has_children": b.get("has_children", False)} for b in blocks],
             "content": "\n".join(lines)
         }
 
@@ -345,25 +409,10 @@ class NotionService:
         if filter_json:
             body["filter"] = filter_json
 
-        target_ds_id = self.KNOWN_DATA_SOURCES.get(clean_id, clean_id)
-
-        try:
-            response = self.client.data_sources.query(data_source_id=target_ds_id, **body)
-        except Exception:
-            try:
-                db = self.client.databases.retrieve(database_id=clean_id)
-                ds_list = db.get("data_sources", [])
-                if ds_list:
-                    ds_id = ds_list[0]["id"].replace("-", "")
-                    response = self.client.data_sources.query(data_source_id=ds_id, **body)
-                else:
-                    response = self.client.request(path=f"databases/{clean_id}/query", method="POST", body=body)
-            except Exception as e:
-                logger.error(f"Error querying database {clean_id}: {e}")
-                return []
+        target_ds_id = self._resolve_data_source(clean_id)
 
         items = []
-        for page in response.get("results", []):
+        for page in self._paginate(self.client.data_sources.query, data_source_id=target_ds_id, **body):
             page_props = {}
             for name, val in page.get("properties", {}).items():
                 p_type = val.get("type")
@@ -400,12 +449,7 @@ class NotionService:
         """Retrieve scheduled tasks and calendar events for a specific date (YYYY-MM-DD) or upcoming items."""
         self._ensure_client()
         # Find Tasks database / data source
-        tasks = self.query_database("d1527102-5287-8329-9cac-81b9d565b99b", page_size=50)
-        if not tasks:
-            # Fallback search
-            results = self.search_workspace(query="Tasks", filter_type="data_source")
-            if results:
-                tasks = self.query_database(results[0]["id"], page_size=50)
+        tasks = self.query_database(self.TASKS_DATA_SOURCE_ID, page_size=100)
 
         scheduled_items = []
         for task in tasks:
@@ -437,7 +481,7 @@ class NotionService:
     def get_projects_map(self) -> Dict[str, str]:
         """Fetch all projects and map their IDs (both hyphenated and clean) to project names."""
         self._ensure_client()
-        projects_data = self.query_database("ba427102-5287-82ef-bdce-815b505396a2", page_size=100)
+        projects_data = self.query_database(self.PROJECTS_DATA_SOURCE_ID, page_size=100)
         proj_map = {}
         for p in projects_data:
             p_id = p.get("id", "")
@@ -452,11 +496,7 @@ class NotionService:
     def get_tasks_for_day(self, target_date: Optional[str] = None) -> List[Dict[str, Any]]:
         """Retrieve rich tasks for a specific date (YYYY-MM-DD), with mapped project names and priority."""
         self._ensure_client()
-        tasks = self.query_database("d1527102-5287-8329-9cac-81b9d565b99b", page_size=100)
-        if not tasks:
-            results = self.search_workspace(query="Tasks", filter_type="data_source")
-            if results:
-                tasks = self.query_database(results[0]["id"], page_size=100)
+        tasks = self.query_database(self.TASKS_DATA_SOURCE_ID, page_size=100)
 
         proj_map = {}
         try:
@@ -567,13 +607,17 @@ class NotionService:
         self._ensure_client()
         clean_id = database_id.replace("-", "")
         
-        # Check if clean_id is a data source and resolve to parent database_id
-        try:
-            ds = self.client.data_sources.retrieve(data_source_id=clean_id)
-            if ds.get("parent", {}).get("type") == "database_id":
-                clean_id = ds["parent"]["database_id"].replace("-", "")
-        except Exception:
-            pass
+        self._check_destination(clean_id)
+        schema = self.get_database_schema(clean_id)
+        source_id = schema["data_source_id"]
+        self._check_destination(source_id)
+        fields = schema["properties"]
+        title_fields = [name for name, field in fields.items() if field["type"] == "title"]
+        if len(title_fields) != 1:
+            raise ValueError("Destination must have exactly one title property.")
+        title_prop_name = title_fields[0]
+        if not title.strip():
+            raise ValueError("Title cannot be empty.")
 
         props: Dict[str, Any] = {
             title_prop_name: {
@@ -583,10 +627,12 @@ class NotionService:
         
         if properties:
             for k, v in properties.items():
-                norm_k = self._normalize_key(k)
+                norm_k = k if k in fields else self._normalize_key(k)
                 if norm_k == title_prop_name:
                     continue
-                props[norm_k] = self._format_property_val(norm_k, v)
+                if norm_k not in fields:
+                    raise ValueError(f"Unknown property {k!r}. Available properties: {', '.join(fields)}. No item was created.")
+                props[norm_k] = self._format_schema_value(norm_k, v, fields[norm_k])
 
         children = []
         if content:
@@ -599,26 +645,121 @@ class NotionService:
             })
 
         body = {
-            "parent": {"database_id": clean_id},
+            "parent": {"data_source_id": source_id},
             "properties": props
         }
         if children:
             body["children"] = children
 
+        # Do not retry an uncertain write or silently drop requested properties.
+        created = self.client.pages.create(**body)
+        return {"id": created["id"], "url": created.get("url"), "status": "created",
+                "data_source_id": source_id, "saved_properties": props}
+
+    def _format_schema_value(self, name: str, value: Any, field: Dict[str, Any]) -> Dict[str, Any]:
+        kind = field["type"]
+        if kind in {"formula", "rollup", "created_time", "last_edited_time", "created_by", "last_edited_by", "unique_id"}:
+            raise ValueError(f"Property {name!r} is computed/read-only.")
+        if isinstance(value, dict):
+            if kind not in value:
+                raise ValueError(f"Property {name!r} requires {kind} data.")
+            return value
+        if kind in {"select", "status"}:
+            options = field.get(kind, {}).get("options", [])
+            matches = [option["name"] for option in options if option["name"].casefold() == str(value).casefold()]
+            if not matches:
+                raise ValueError(f"Invalid {name!r}: choose from {[option['name'] for option in options]}.")
+            return {kind: {"name": matches[0]}}
+        if kind == "relation":
+            ids = value if isinstance(value, list) else [value]
+            return {"relation": [{"id": str(item).replace("-", "")} for item in ids]}
+        if kind == "date":
+            return {"date": {"start": value} if value else None}
+        if kind in {"title", "rich_text"}:
+            return {kind: [{"text": {"content": str(value)}}]}
+        if kind == "checkbox" and isinstance(value, bool):
+            return {kind: value}
+        if kind == "number" and (value is None or isinstance(value, (int, float)) and not isinstance(value, bool)):
+            return {kind: value}
+        if kind in {"url", "email", "phone_number"}:
+            return {kind: value}
+        raise ValueError(f"Provide a typed Notion {kind} value for {name!r}.")
+
+    def _validate_project(self, project_id: str) -> None:
+        project = self.client.pages.retrieve(page_id=project_id.replace("-", ""))
+        parent = project.get("parent", {})
+        parent_id = parent.get("data_source_id") or parent.get("database_id", "")
+        if project.get("archived") or project.get("in_trash") or parent_id.replace("-", "") not in {
+            self.PROJECTS_DATA_SOURCE_ID, self.PROJECTS_DATABASE_ID,
+        }:
+            raise ValueError("Project must be an active entry in Life Hub Manager's master Projects database.")
+
+    def create_task(self, title: str, due_date: str = "", project_id: str = "", content: str = "") -> Dict[str, Any]:
+        self._ensure_client()
+        props: Dict[str, Any] = {"Status": "Not started"}
+        if due_date:
+            date.fromisoformat(due_date)
+            props["Do Date"] = due_date
+        if project_id:
+            self._validate_project(project_id)
+            props["Projects"] = [project_id]
+        return self.create_database_item(self.TASKS_DATA_SOURCE_ID, title, properties=props, content=content)
+
+    def ensure_project_tasks_view(self, project_id: str, view_type: str = "table") -> Dict[str, Any]:
+        self._ensure_client()
+        self._validate_project(project_id)
+        if view_type not in {"table", "list", "board", "gallery", "calendar", "timeline"}:
+            raise ValueError("Unsupported project task view type.")
+        clean_project_id = project_id.replace("-", "")
+        task_filter = {"property": "Projects", "relation": {"contains": clean_project_id}}
+        fields = self.get_database_schema(self.TASKS_DATA_SOURCE_ID)["properties"]
+        project_property = fields["Projects"].get("id", "Projects")
+        # Find a prior successful view before retrying a partially completed project setup.
+        references = []
+        for block in self._paginate(self.client.blocks.children.list, block_id=clean_project_id, page_size=100):
+            if block.get("type") == "child_database":
+                references.extend(self._paginate(self.client.views.list, database_id=block["id"]))
+        for reference in references:
+            view = self.client.views.retrieve(view_id=reference["id"])
+            if view.get("type") != view_type or (view.get("data_source_id") or "").replace("-", "") != self.TASKS_DATA_SOURCE_ID:
+                continue
+            relation = view.get("filter", {}).get("relation", {}) if view.get("filter") else {}
+            contains = str(relation.get("contains", "")).replace("-", "")
+            if unquote(view.get("filter", {}).get("property", "")) in {"Projects", unquote(project_property)} and contains == clean_project_id:
+                return {"status": "ready", "view_id": view["id"], "url": view.get("url"), "reused": True}
+        configuration: Dict[str, Any] = {"type": view_type}
+        if view_type == "board":
+            configuration["group_by"] = {"type": "status", "property_id": fields["Status"]["id"], "group_by": "group", "sort": {"type": "manual"}}
+        elif view_type in {"calendar", "timeline"}:
+            configuration["date_property_id"] = fields["Do Date"]["id"]
+        view = self.client.views.create(
+            create_database={"parent": {"type": "page_id", "page_id": clean_project_id}},
+            data_source_id=self.TASKS_DATA_SOURCE_ID, name="Project Tasks", type=view_type,
+            filter=task_filter, configuration=configuration,
+        )
+        return {"status": "ready", "view_id": view["id"], "url": view.get("url"), "reused": False}
+
+    def create_project(self, title: str, content: str = "", view_type: str = "table") -> Dict[str, Any]:
+        if not title.strip():
+            raise ValueError("Project title cannot be empty.")
+        if view_type not in {"table", "list", "board", "gallery", "calendar", "timeline"}:
+            raise ValueError("Unsupported project task view type.")
+        matches = [item for item in self.query_database(
+            self.PROJECTS_DATA_SOURCE_ID, filter_json={"property": "Name", "title": {"equals": title}},
+        ) if not item.get("properties", {}).get("Archive")]
+        if len(matches) > 1:
+            raise ValueError("Multiple projects have that name. Select the project ID before creating tasks or a view.")
+        if matches:
+            result = {**matches[0], "status": "existing"}
+        else:
+            result = self.create_database_item(self.PROJECTS_DATA_SOURCE_ID, title, content=content)
         try:
-            created = self.client.pages.create(**body)
-            return {"id": created.get("id"), "url": created.get("url"), "status": "created"}
-        except Exception as e:
-            # If property validation failed, retry with just title and basic status
-            logger.warning(f"Initial page create failed ({e}). Retrying with safe core properties...")
-            safe_props = {title_prop_name: {"title": [{"text": {"content": title}}]}}
-            if "Status" in props:
-                safe_props["Status"] = props["Status"]
-            safe_body = {"parent": {"database_id": clean_id}, "properties": safe_props}
-            if children:
-                safe_body["children"] = children
-            created = self.client.pages.create(**safe_body)
-            return {"id": created.get("id"), "url": created.get("url"), "status": "created"}
+            result["tasks_view"] = self.ensure_project_tasks_view(result["id"], view_type)
+        except Exception as exc:
+            logger.warning("Project exists but tasks view setup failed: %s", type(exc).__name__)
+            result.update(status="partial", error="Project saved, but the task view could not be confirmed.",
+                          next_step="Call ensure_project_tasks_view with this project ID; do not create another project.")
+        return result
 
     def update_page_properties(self, page_id: str, properties: Dict[str, Any]) -> Dict[str, Any]:
         """Update properties of an existing Notion page or database item (e.g. status, priority, archive)."""
@@ -636,15 +777,15 @@ class NotionService:
         """Append text blocks to an existing page."""
         self._ensure_client()
         clean_id = page_id.replace("-", "")
+        self._check_destination(clean_id)
+        if block_type == "to_do" or any(line.lstrip().startswith(("- [ ]", "- [x]", "* [ ]", "* [x]")) for line in text.splitlines()):
+            raise ValueError("Save actionable tasks with create_task in the master Tasks database, not page checkboxes.")
         
-        valid_type = block_type if block_type in ["paragraph", "heading_2", "heading_3", "bulleted_list_item", "to_do"] else "paragraph"
+        valid_type = block_type if block_type in ["paragraph", "heading_2", "heading_3", "bulleted_list_item"] else "paragraph"
         
         block_body: Dict[str, Any] = {
             "rich_text": [{"type": "text", "text": {"content": text}}]
         }
-        if valid_type == "to_do":
-            block_body["checked"] = False
-
         children = [{
             "object": "block",
             "type": valid_type,
@@ -658,6 +799,7 @@ class NotionService:
         """Create a new child page under a parent page."""
         self._ensure_client()
         clean_id = parent_page_id.replace("-", "")
+        self._check_destination(clean_id)
         
         body = {
             "parent": {"page_id": clean_id},
@@ -686,6 +828,7 @@ class NotionService:
         """Create an actual Notion database with schema properties and layout view under a parent page."""
         self._ensure_client()
         clean_id = parent_page_id.replace("-", "")
+        self._check_destination(clean_id)
 
         # Default properties if none provided or empty
         if not properties:
@@ -768,21 +911,12 @@ class NotionService:
         parent = {"type": "page_id", "page_id": clean_id}
         title_arr = [{"type": "text", "text": {"content": title}}]
 
-        try:
-            created_db = self.client.databases.create(
-                parent=parent,
-                title=title_arr,
-                is_inline=is_inline,
-                initial_data_source={"properties": formatted_props}
-            )
-        except Exception as err:
-            logger.warning(f"databases.create with initial_data_source failed: {err}. Retrying with properties...")
-            created_db = self.client.databases.create(
-                parent=parent,
-                title=title_arr,
-                is_inline=is_inline,
-                properties=formatted_props
-            )
+        created_db = self.client.databases.create(
+            parent=parent,
+            title=title_arr,
+            is_inline=is_inline,
+            initial_data_source={"properties": formatted_props}
+        )
 
         db_id = created_db.get("id")
         data_sources = created_db.get("data_sources", [])
@@ -815,9 +949,10 @@ class NotionService:
             "data_source_id": ds_id,
             "title": title,
             "url": created_db.get("url"),
-            "view_type": norm_view,
+            "view_type": norm_view if created_view_id or norm_view == "table" else "table",
+            "requested_view_type": norm_view,
             "view_id": created_view_id,
-            "status": "created"
+            "status": "created" if created_view_id or norm_view == "table" else "partial"
         }
 
 notion_service = NotionService()

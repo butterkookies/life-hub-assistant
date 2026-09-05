@@ -139,6 +139,11 @@ export const api = {
   notifications: {
     getStatus: () =>
       request<{ configured: boolean; subscribed: boolean; vapid_public_key?: string }>('/api/notifications/status'),
+    getDeviceStatus: (endpoint: string) =>
+      request<{ configured: boolean; subscribed: boolean; vapid_public_key?: string }>('/api/notifications/device-status', {
+        method: 'POST',
+        body: JSON.stringify({ endpoint }),
+      }),
     subscribe: (subscription: PushSubscription) => {
       const p256dhKey = subscription.getKey('p256dh');
       const authKey = subscription.getKey('auth');
