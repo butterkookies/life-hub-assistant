@@ -29,10 +29,15 @@ Your capabilities:
 6. Update task statuses (e.g. mark as Done, in progress), change dates, or check archive boxes.
 7. Append quick thoughts, bullet points, or checklist items to existing pages.
 8. Create new standalone pages.
+9. Create actual Notion databases (with custom columns like Status, Priority, Due Date, and view layouts like Table, List, Board, Gallery, Calendar) under any project or parent page using `create_database`.
 
 Formatting & Style Guidelines:
-- Format your replies cleanly for Telegram using Telegram-friendly formatting (*bold*, _italic_, `monospace`, bullet points, emojis).
+- Format your replies cleanly using Markdown (*bold*, _italic_, `monospace`, bullet points, links, emojis).
 - When a user asks about today's schedule, scan the calendar/tasks for today's date and present a crisp breakdown of completed vs pending items.
+- When Andrei asks to create a new project with a database (e.g. "create a project named X and a database inside it to track tasks in list/board/gallery/table view"):
+  1. First create the project page using `create_new_page`.
+  2. Then immediately create the database inside that project page using `create_database`, setting the requested `view_type` ('table', 'list', 'board', 'gallery', 'calendar', 'timeline').
+  3. Do NOT merely write a checklist in markdown or bullet points when an actual Notion database is requested.
 - Keep answers helpful, concise, and confirm the exact title and links of created/modified items.
 - If processing a voice note, briefly acknowledge the user's spoken intent and confirm the action taken.
 
@@ -120,6 +125,38 @@ def create_new_page(parent_page_id: str, title: str, content: str = "") -> str:
     except Exception as e:
         return f"Error creating page: {str(e)}"
 
+def create_database(
+    parent_page_id: str,
+    title: str,
+    properties_json: str = "{}",
+    view_type: str = "table",
+    is_inline: bool = True
+) -> str:
+    """Create a new actual Notion database (with columns/properties and layout view) under a parent page.
+
+    Use this tool whenever the user asks to create a database, task tracker, table, board, or gallery.
+
+    :param parent_page_id: The UUID of the parent page (e.g. from create_new_page or search_notion).
+    :param title: The title of the new database (e.g. 'Tasks', 'Project Backlog', 'Features').
+    :param properties_json: Optional JSON string of column names to types, e.g.:
+        '{"Task": "title", "Status": "status", "Priority": "select", "Due Date": "date", "Notes": "rich_text"}'
+        If empty or '{}', a standard task tracking schema is automatically generated.
+    :param view_type: The layout style of the database view: 'table', 'list', 'board', 'gallery', 'calendar', or 'timeline'.
+    :param is_inline: Whether the database appears inline on the page (default True).
+    """
+    try:
+        props = json.loads(properties_json) if properties_json and properties_json.strip() and properties_json != "{}" else None
+        res = notion_service.create_database(
+            parent_page_id=parent_page_id,
+            title=title,
+            properties=props,
+            view_type=view_type,
+            is_inline=is_inline
+        )
+        return json.dumps(res, indent=2)
+    except Exception as e:
+        return f"Error creating database: {str(e)}"
+
 TOOLS = [
     get_calendar_schedule,
     search_notion,
@@ -128,8 +165,10 @@ TOOLS = [
     create_database_item,
     update_page_properties,
     append_to_page,
-    create_new_page
+    create_new_page,
+    create_database
 ]
+
 
 MODEL_TIERS = [
     {"model": "gemini-3.5-flash-lite", "display": "Gemini 3.5 Flash Lite", "thinking": False},

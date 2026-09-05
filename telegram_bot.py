@@ -1032,12 +1032,17 @@ async def post_init(application: Application) -> None:
     asyncio.create_task(image_state_cleanup_scheduler())
 
 def main():
+    if not settings.ENABLE_TELEGRAM:
+        print("ℹ️ Telegram bot is disabled (ENABLE_TELEGRAM=false). Set ENABLE_TELEGRAM=true to run Telegram.")
+        return
+
     token = settings.TELEGRAM_BOT_TOKEN
     if not token:
-        print("❌ Error: TELEGRAM_BOT_TOKEN is not set in .env")
+        print("ℹ️ Telegram bot token not provided. Exiting Telegram service gracefully.")
         return
 
     # Start background health server for Render / Koyeb / Railway port binding
+
     start_health_server(settings.PORT)
 
     print("🤖 Starting Telegram Notion AI Bot...")

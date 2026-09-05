@@ -1,165 +1,203 @@
-# 🤖 Notion AI Assistant (Telegram + Google Gemini + Notion API)
+# 🏛️ Andrei's Life Hub Assistant (Mobile-First PWA + FastAPI + Notion AI)
 
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
+[![React 18](https://img.shields.io/badge/React-18.3-61DAFB.svg)](https://react.dev/)
 [![Google Gemini](https://img.shields.io/badge/AI-Google%20Gemini%202.5%20Flash-orange.svg)](https://aistudio.google.com/)
 [![Notion API](https://img.shields.io/badge/Notion-API%20v1-black.svg)](https://developers.notion.com/)
-[![Telegram Bot](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0.svg)](https://core.telegram.org/bots)
+[![PWA](https://img.shields.io/badge/PWA-Installable-purple.svg)](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A personal, mobile-first AI assistant bot on **Telegram** that connects directly to your **Notion Workspace** and **Notion Calendar** using **Google Gemini 2.5 Flash**. 
+An installable, mobile-first Progressive Web App (PWA) named **"Andrei's Life Hub Assistant"** (short name: **"Life Hub"**) that connects Andrei directly to his **Notion Workspace (Life Hub)** and **Notion Calendar** using **Google Gemini AI**.
 
-Send text or record **voice notes** directly from your phone to manage tasks, query databases, append journal entries, and search documents with zero monthly subscription fees ($0).
+It replaces Telegram as the primary interaction medium while running on a **100% free, zero-cost personal deployment** on Windows exposed privately and securely to iPhone and iPad via **Tailscale Serve (HTTPS)**.
 
 ---
 
 ## 🌟 Highlights
 
-- 🎙️ **Native Voice-to-Action**: Send Telegram voice notes from your phone lock screen; Gemini automatically transcribes your speech, extracts the intent, and creates/queries entries in Notion.
-- 📷 **Image-to-Notion Workout Logging**: Send a treadmill display photo; Gemini extracts typed statistics, validates them, safely upserts the daily health record, and attaches the source image for reference.
-- 🪟 **Windows Desktop Home Screen Widget**: A modern, sleek floating or desktop-pinned widget on your Windows PC showing your tasks for the day, live completion progress, instant check-off sync, quick task creation, and system tray integration.
-- 🧠 **Autonomous Function Calling**: Gemini intelligently selects tools to search workspace pages, read full markdown docs, query database filters, or create tasks.
-- 🔒 **Ironclad Privacy & Whitelisting**: Restricted exclusively to your authorized Telegram User ID (`ALLOWED_TELEGRAM_USER_IDS`). Any unauthorized sender receives an immediate 403 access denial.
-- 🛡️ **Anti-Leak Guardrails**: AI system instructions prevent leaking internal environment variables, tokens, or system configurations.
-- ⚡ **$0 Infrastructure**: Runs completely on free tiers (Telegram Bot API + Google AI Studio Free Tier + Notion API).
-
+- 📱 **Mobile-First Installable PWA**: Designed specifically for iPhone (Safari "Add to Home Screen" standalone mode), iPad, Windows, and modern desktop/mobile browsers. Full iOS safe-area support (`viewport-fit=cover`), touch targets, and offline app shell caching.
+- 🎨 **Notion Design System**: Warm paper canvas (`#fbfbfa`), pure white cards (`#ffffff`), hairline borders (`#e9e9e8`), Inter typography, Notion blue accents (`#0075de`), and layered micro-shadows.
+- 🎙️ **Native In-App Voice Notes**: Hold or tap the mic button to record voice notes directly in the browser/PWA via `MediaRecorder`. Gemini transcribes your speech and executes Notion workspace actions with zero external paid transcription APIs.
+- 📷 **Treadmill Display Workout Scanner**: Take or attach a treadmill photo; Gemini extracts structured metrics (duration, distance, steps, calories, speed, heart rate) with plausibility checks, conflict detection against Notion, and interactive **Save / Edit / Cancel** review cards.
+- 🌅 **Automated Morning Briefings**: Generates crisp, motivating morning briefings based on today's Notion schedule and tasks (Asia/Manila time, UTC+8), delivered to Web Push, email, or your in-app briefing timeline.
+- 🔔 **Web Push Notifications**: Standards-based Web Push via VAPID (compatible with iOS 16.4+ standalone Home Screen apps).
+- 🔒 **Ironclad Single-User Security**: Password authentication with PBKDF2-HMAC-SHA256 (600,000 rounds), signed HttpOnly Secure cookies, sliding-window rate limiting, CSRF origin verification, and upload magic-byte verification.
+- 🗄️ **Local SQLite Persistence**: Conversations, messages, tool summaries, upload metadata, and pending workout scans persist in `data/life_hub.db` outside version control.
+- ⚡ **$0 Hosting & Infrastructure**: Runs on your Windows computer exposed securely over Tailscale with Tailscale Serve providing free, valid HTTPS.
 
 ---
 
 ## 🏛️ System Architecture
 
 ```
-[ 📱 Your Phone (Telegram App) ]
-         │  (Text Message / Voice Audio Note)
-         ▼
-[ ☁️ Telegram Cloud API ]
-         │  (Secure Long-Polling / Webhook)
-         ▼
-[ 💻 Python Bot Daemon (telegram_bot.py) ]
+[ 📱 iPhone / iPad (Safari PWA) ] ──── [ 💻 Windows / Desktop Browser ]
+                       │                        │
+                       ▼                        ▼
+      [ 🔒 Tailscale Serve (Free Private HTTPS) ]
+                       │
+                       ▼
+      [ 🚀 FastAPI Application (server/main.py) ]
+         ├── Security Headers, CSRF & Cookie Session Auth
+         ├── SQLite Persistence (data/life_hub.db)
+         ├── Web Push Notification Dispatcher (VAPID)
          │
-         ├──▶ [ 🔒 User ID Whitelist Auth (config.py) ]
+         ▼
+      [ 🧠 Transport-Neutral Assistant Service ]
          │
-         ├──▶ [ 🧠 Google Gemini 2.5 Flash Engine (gemini_agent.py) ]
-         │           │
-         │           ▼ (Function Calling)
-         │      [ 🛠️ Tool Registry (search, read, create, append) ]
-         │           │
+         ├──▶ [ Google Gemini 2.5 / 3.5 Flash Engine ]
+         │       └── Multi-Tier Free-Tier Fallback Chain
+         │
          └──▶ [ 🔌 Notion Service API (notion_service.py) ]
-                     │
-                     ▼
-          [ 🗄️ Notion Cloud Workspace & Databases ]
+                 └── Calendar, Tasks, Notes, Daily Health Log
 ```
 
 ---
 
-## 🚀 Quickstart Guide
+## 🚀 Quickstart & Setup Guide
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/butterkookies/notion-ai-bot.git
-cd notion-ai-bot
-```
+### 1. Prerequisites
+- **Python 3.12+** or **Python 3.14+**
+- **Node.js 20+** and **npm**
+- Active Notion Integration connected to your Notion `Life Hub` workspace page (click `•••` -> **Connections** -> add your integration).
 
 ### 2. Install Dependencies
 ```bash
+# Python backend dependencies
 pip install -r requirements.txt
+
+# Web frontend dependencies
+cd web
+npm install
+npm run build
+cd ..
 ```
 
-### 3. Configure Your Environment
-Create your `.env` file from the template:
+### 3. Generate Security Credentials
+Generate your password hash and VAPID keys using the included helper scripts:
+
 ```bash
-cp .env.example .env
+# 1. Generate your access password hash:
+python generate_password_hash.py -p your_secure_password_here
+
+# 2. Generate your Web Push VAPID keys:
+python generate_vapid_keys.py
 ```
 
-Populate your `.env` with your credentials:
+### 4. Configure Your `.env` File
+Create `.env` in the project root:
 ```env
-# Telegram Bot Token (from @BotFather on Telegram)
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+# ==============================================================================
+# Web App Authentication
+# ==============================================================================
+WEB_PASSWORD_HASH="pbkdf2:sha256:600000$your_salt$your_hash"
+WEB_SESSION_SECRET="your_random_secret_session_key_at_least_32_characters_long"
+WEB_ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000"
 
-# Your Telegram User ID (from @userinfobot on Telegram)
-ALLOWED_TELEGRAM_USER_IDS=1234567890
-
-# Google Gemini API Key (from https://aistudio.google.com)
+# ==============================================================================
+# AI & Notion Keys
+# ==============================================================================
 GEMINI_API_KEY=your_gemini_api_key_here
-
-# Notion Internal Integration Secret (from https://www.notion.so/my-integrations)
 NOTION_API_KEY=ntn_your_notion_integration_secret_here
-```
 
-> **Important**: In Notion, open your root workspace page (e.g. `Life Hub`), click `•••` in the top right ➔ **Connections** ➔ add your integration so the bot has read/write permission.
+# ==============================================================================
+# Web Push Notifications (Optional)
+# ==============================================================================
+WEB_PUSH_VAPID_PUBLIC_KEY="your_public_key"
+WEB_PUSH_VAPID_PRIVATE_KEY="your_private_key"
+WEB_PUSH_CONTACT="mailto:your_email@example.com"
 
-### 4. Run the Bot
-```bash
-python telegram_bot.py
+# ==============================================================================
+# Daily Briefings & Schedule (Asia/Manila is UTC+8)
+# ==============================================================================
+DAILY_BRIEFING_ENABLED=true
+DAILY_BRIEFING_TIME=06:00
+UTC_OFFSET_HOURS=8
+
+# ==============================================================================
+# Optional Telegram Fallback (Disabled by default)
+# ==============================================================================
+ENABLE_TELEGRAM=false
+PORT=8000
 ```
 
 ---
 
-## 🪟 Windows PC Home Screen Desktop Widget (React 19 + Electron + Notion Design)
+## 🏃 Running the Application
 
-A native Windows desktop home screen widget built with **React 19, TypeScript, Electron, and Tailwind CSS**, designed pixel-by-pixel following the **Notion DESIGN.md** design system.
-
-### Features
-- 🎨 **Notion Design System**: Warm paper canvas (`#f6f5f4`), pure white cards (`#ffffff`), hairline borders (`#e6e6e6`), layered micro-shadows, tight-tracked Inter typography, Notion blue (`#0075de`), and playful sticker project tags.
-- 📋 **Today's Tasks at a Glance**: Displays all tasks scheduled for today (`Do Date`), categorized with project sticker pills, status indicators, and priority badges.
-- ⚡ **Instant Optimistic Check-off**: Click the status circle to toggle a task (`Done` / `In progress` / `Not started`); updates in Notion in real-time with zero UI lag.
-- 👁️ **Notion Page Mini-Preview**: Click any task or the eye icon to expand a mini-preview drawer showing the page's child blocks and markdown notes.
-- ➕ **Inline Quick Add & Detailed Modal**: Type directly into the `+ New task...` row at the bottom and hit Enter, or click `+` on the header for full project/date selection.
-- 🔍 **Search & Project Filter Chips**: Filter tasks by project stickers or instant search.
-- 📊 **Daily Completion Progress Bar**: Visual progress tracking (e.g. `4 of 8 Completed · 50%`).
-- 📌 **Pin to Desktop or Float**: Easily toggle between Always on Top (floating above windows) and Desktop gadget mode (`Ctrl+Shift+T` global hotkey).
-- 📥 **System Tray Agent**: Minimizes cleanly to the Windows system tray with right-click quick controls.
-- 🚀 **Windows Auto-Startup**: Enable auto-launch on boot via widget settings (`⚙️`).
-
-### How to Launch the Widget
-
+### Option A: 1-Click Production Mode (Recommended)
+Double-click `run_prod.bat` in the project root, or execute:
 ```bash
-# Option 1: Double-click the root launcher script
-start_widget.bat
-
-# Option 2: Run directly from widget/ directory
-cd widget
-npm run start
+run_prod.bat
 ```
+The server will compile the frontend (if needed) and run on `http://127.0.0.1:8000`.
 
-
+### Option B: 1-Click Live-Reload Development Mode
+Double-click `run_dev.bat` in the project root, or execute:
+```bash
+run_dev.bat
+```
+Starts FastAPI on `http://127.0.0.1:8000` and Vite with hot module replacement on `http://localhost:5173`.
 
 ---
 
-## ☁️ 24/7 Cloud Deployment (100% Free)
+## 📱 iPhone & iPad Setup via Tailscale Serve (100% Free HTTPS)
 
-To keep your bot running 24/7 without needing your personal computer turned on:
+Tailscale provides private encrypted networking and automatically signs free, trusted TLS certificates for your machines:
 
-1. Push your repository to **GitHub** (keep it **Private**).
-2. Create a free account at [Render](https://render.com) or [Railway](https://railway.app).
-3. Create a new **Background Worker** service and connect your GitHub repo.
-4. Add the 4 environment variables from your `.env` into the host dashboard.
-5. Set the Start Command to:
-   ```bash
-   python telegram_bot.py
+1. Install [Tailscale](https://tailscale.com) on your Windows PC and iPhone.
+2. Sign in to both devices under the same Tailscale account.
+3. Enable HTTPS on your Windows PC by running in PowerShell (as Administrator):
+   ```powershell
+   tailscale serve --bg 8000
    ```
-6. Click **Deploy**! Your bot is now active 24/7.
+4. Tailscale gives you a private HTTPS URL, for example:
+   `https://my-windows-pc.your-tailnet.ts.net`
+5. Open that URL in **Safari** on your iPhone.
+6. Tap the **Share** button in Safari (box with upward arrow) ➔ scroll down and tap **Add to Home Screen** ➔ tap **Add**.
+7. Open **Life Hub** from your Home Screen! It runs as a native standalone app with full offline shell caching, camera access, voice recording, and push notifications.
 
 ---
 
-## 💬 Example Commands & Voice Prompts
+## 💾 Database Backups & Restore
 
-| Interaction | Example Prompt | Action Performed |
-| :--- | :--- | :--- |
-| **Search Workspace** | *"What active projects do I have in my workspace?"* | Searches Notion databases and returns formatted summary links. |
-| **Create Task** | *"Add high-priority task for BSIT-31A: 3D modeling due Friday"* | Adds a new row in the Tasks database linked to the project. |
-| **Voice Note** | 🎙️ *(Speak: "Add a reminder to back up my Blender files this weekend")* | Transcribes audio, detects intent, and creates the reminder. |
-| **Read Notes** | *"Read the page BSIT-31A and tell me what tasks are pending"* | Reads block content and outputs pending assignments. |
-| **Quick Journal** | *"Add bullet point to my Daily Journal: Completed bot setup today"* | Appends a bullet block to your Journal page. |
+The SQLite database is stored locally in `data/life_hub.db`. Use the automated tools to create crash-safe point-in-time snapshots:
 
----
+```bash
+# Create a live online backup:
+python backup_database.py
+# Output saved to: backups/life_hub_backup_YYYYMMDD_HHMMSS.db
 
-## 🔒 Security & Privacy
+# Restore from the most recent backup:
+python restore_database.py
 
-- **Never Commits Secrets**: `.env` is ignored by default in `.gitignore`.
-- **Sender Validation**: The bot validates every incoming message's `effective_user.id` against `ALLOWED_TELEGRAM_USER_IDS` before executing any LLM or Notion code.
-- **Confidentiality Guardrails**: Gemini system instructions strictly forbid repeating or revealing environment tokens or internal IDs.
+# Or restore from a specific file:
+python restore_database.py -f backups/life_hub_backup_20260904_102632.db
+```
 
 ---
 
-## 📄 License
-Distributed under the MIT License. See `LICENSE` for more information.
+## 🧪 Testing & Verification Suite
+
+Run the full automated test suite (65+ tests) verifying auth, sessions, CSRF, idempotency, media uploads, workout confirmations, briefing scheduler, and mobile flows:
+
+```bash
+python -m pytest tests
+```
+
+To typecheck and test the frontend:
+```bash
+cd web
+npx tsc --noEmit
+npm run build
+```
+
+---
+
+## 🧩 Extending with New AI Agents
+
+The application features a transport-neutral agent architecture. To add a new specialized agent:
+1. Open [`server/services/agent_registry.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/services/agent_registry.py).
+2. Register your agent definition with `id`, `name`, `description`, and `capabilities`.
+3. Route incoming messages in [`server/services/assistant_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/services/assistant_service.py) based on `agent_id`.
+4. The agent will automatically appear in the Life Hub header dropdown on both mobile and desktop!

@@ -675,4 +675,149 @@ class NotionService:
         created = self.client.pages.create(**body)
         return {"id": created.get("id"), "url": created.get("url"), "status": "created"}
 
+    def create_database(
+        self,
+        parent_page_id: str,
+        title: str,
+        properties: Optional[Dict[str, Any]] = None,
+        view_type: str = "table",
+        is_inline: bool = True
+    ) -> Dict[str, Any]:
+        """Create an actual Notion database with schema properties and layout view under a parent page."""
+        self._ensure_client()
+        clean_id = parent_page_id.replace("-", "")
+
+        # Default properties if none provided or empty
+        if not properties:
+            formatted_props = {
+                "Task": {"title": {}},
+                "Status": {
+                    "status": {
+                        "options": [
+                            {"name": "Not started", "color": "default"},
+                            {"name": "In progress", "color": "blue"},
+                            {"name": "Done", "color": "green"}
+                        ]
+                    }
+                },
+                "Priority": {
+                    "select": {
+                        "options": [
+                            {"name": "Low", "color": "gray"},
+                            {"name": "Medium", "color": "yellow"},
+                            {"name": "High", "color": "red"}
+                        ]
+                    }
+                },
+                "Due Date": {"date": {}},
+                "Notes": {"rich_text": {}}
+            }
+        else:
+            formatted_props = {}
+            has_title = False
+            for k, v in properties.items():
+                if isinstance(v, dict):
+                    formatted_props[k] = v
+                    if "title" in v:
+                        has_title = True
+                elif isinstance(v, str):
+                    vt = v.lower().strip()
+                    if vt in ["title", "name", "task"]:
+                        formatted_props[k] = {"title": {}}
+                        has_title = True
+                    elif vt in ["status"]:
+                        formatted_props[k] = {
+                            "status": {
+                                "options": [
+                                    {"name": "Not started", "color": "default"},
+                                    {"name": "In progress", "color": "blue"},
+                                    {"name": "Done", "color": "green"}
+                                ]
+                            }
+                        }
+                    elif vt in ["select", "priority"]:
+                        formatted_props[k] = {
+                            "select": {
+                                "options": [
+                                    {"name": "Low", "color": "gray"},
+                                    {"name": "Medium", "color": "yellow"},
+                                    {"name": "High", "color": "red"}
+                                ]
+                            }
+                        }
+                    elif vt in ["multi_select", "tags"]:
+                        formatted_props[k] = {"multi_select": {}}
+                    elif vt in ["date", "due_date", "due"]:
+                        formatted_props[k] = {"date": {}}
+                    elif vt in ["checkbox", "done", "completed"]:
+                        formatted_props[k] = {"checkbox": {}}
+                    elif vt in ["number"]:
+                        formatted_props[k] = {"number": {"format": "number"}}
+                    elif vt in ["people", "assignee", "user"]:
+                        formatted_props[k] = {"people": {}}
+                    elif vt in ["url"]:
+                        formatted_props[k] = {"url": {}}
+                    else:
+                        formatted_props[k] = {"rich_text": {}}
+                else:
+                    formatted_props[k] = {"rich_text": {}}
+
+            if not has_title:
+                formatted_props = {"Task": {"title": {}}, **formatted_props}
+
+        parent = {"type": "page_id", "page_id": clean_id}
+        title_arr = [{"type": "text", "text": {"content": title}}]
+
+        try:
+            created_db = self.client.databases.create(
+                parent=parent,
+                title=title_arr,
+                is_inline=is_inline,
+                initial_data_source={"properties": formatted_props}
+            )
+        except Exception as err:
+            logger.warning(f"databases.create with initial_data_source failed: {err}. Retrying with properties...")
+            created_db = self.client.databases.create(
+                parent=parent,
+                title=title_arr,
+                is_inline=is_inline,
+                properties=formatted_props
+            )
+
+        db_id = created_db.get("id")
+        data_sources = created_db.get("data_sources", [])
+        ds_id = data_sources[0].get("id") if data_sources else None
+
+        if db_id and ds_id:
+            clean_db = db_id.replace("-", "")
+            clean_ds = ds_id.replace("-", "")
+            self.KNOWN_DATA_SOURCES[clean_db] = clean_ds
+
+        # Create custom view if requested (e.g. list, board, gallery, calendar, timeline)
+        created_view_id = None
+        valid_views = ["table", "board", "list", "gallery", "calendar", "timeline"]
+        norm_view = view_type.lower().strip()
+        if norm_view in valid_views and norm_view != "table" and ds_id:
+            try:
+                view_res = self.client.views.create(
+                    database_id=db_id,
+                    data_source_id=ds_id,
+                    name=f"{title} ({norm_view.capitalize()} View)",
+                    type=norm_view,
+                    configuration={"type": norm_view}
+                )
+                created_view_id = view_res.get("id")
+            except Exception as e_view:
+                logger.warning(f"Could not create custom view '{norm_view}': {e_view}")
+
+        return {
+            "id": db_id,
+            "data_source_id": ds_id,
+            "title": title,
+            "url": created_db.get("url"),
+            "view_type": norm_view,
+            "view_id": created_view_id,
+            "status": "created"
+        }
+
 notion_service = NotionService()

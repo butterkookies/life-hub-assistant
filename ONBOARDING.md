@@ -1,6 +1,6 @@
-# 📘 Notion AI Assistant & Desktop Widget — Onboarding & Architecture Guide
+# 📘 Andrei's Life Hub Assistant — Onboarding & Architecture Guide
 
-> **For ChatGPT / AI Assistants & Developers:** This document serves as the single source of truth for understanding, running, maintaining, and extending this codebase. It covers the full ecosystem: the **Telegram AI Bot** (with Google Gemini 2.5/3.x function calling and voice notes), the **Proactive Morning Briefing & Email Dispatcher**, and the **Windows Desktop Home Screen Widget** (React 19 + Electron + Notion Design System).
+> **For AI Assistants & Developers:** This document is the source of truth for understanding, running, maintaining, and extending **Andrei’s Life Hub Assistant** — an installable mobile-first PWA and FastAPI backend that connects Andrei directly to his Notion workspace and calendar. Telegram is maintained as an optional secondary fallback. The Electron desktop widget is maintained separately in the sibling `NOTION-WIDGET` directory.
 
 ---
 
@@ -10,99 +10,77 @@
 2. [End-to-End System Architecture](#2-end-to-end-system-architecture)
 3. [Repository File Map & Responsibilities](#3-repository-file-map--responsibilities)
 4. [Notion Workspace & Database Schemas](#4-notion-workspace--database-schemas)
-5. [Telegram Bot & AI Engine](#5-telegram-bot--ai-engine)
-   - [Gemini Agent & Multi-Tier Fallback](#gemini-agent--multi-tier-fallback)
-   - [Autonomous Function Calling / Tool Registry](#autonomous-function-calling--tool-registry)
-   - [Multimodal Voice-to-Action Pipeline](#multimodal-voice-to-action-pipeline)
-   - [Image-to-Notion Workout Pipeline](#image-to-notion-workout-pipeline)
-   - [Automated Morning Briefing Scheduler](#automated-morning-briefing-scheduler)
-   - [Email Service (HTML Newsletters & Alerts)](#email-service-html-newsletters--alerts)
-   - [Telegram HTML Formatting Engine](#telegram-html-formatting-engine)
-   - [Security & Whitelisting Protocol](#security--whitelisting-protocol)
-6. [Windows Desktop Home Screen Widget](#6-windows-desktop-home-screen-widget)
-   - [Tech Stack & Design Philosophy](#tech-stack--design-philosophy)
-   - [IPC Communication Contract](#ipc-communication-contract)
-   - [Key Interactive Features](#key-interactive-features)
-   - [Window Management & System Tray](#window-management--system-tray)
-7. [Configuration & Environment Variables](#7-configuration--environment-variables)
-8. [Getting Started & Local Execution](#8-getting-started--local-execution)
-9. [Testing & Diagnostics Suite](#9-testing--diagnostics-suite)
+5. [Web PWA & Shared Backend Architecture](#5-web-pwa--shared-backend-architecture)
+   - [FastAPI & Security Layer](#fastapi--security-layer)
+   - [Agent Registry & Transport-Neutral Assistant](#agent-registry--transport-neutral-assistant)
+   - [SQLite Persistence & Idempotency](#sqlite-persistence--idempotency)
+   - [Workout Confirmation Pipeline](#workout-confirmation-pipeline)
+   - [Web Push & Briefing Scheduler](#web-push--briefing-scheduler)
+6. [Configuration & Environment Variables](#6-configuration--environment-variables)
+7. [Getting Started & Local Execution](#7-getting-started--local-execution)
+8. [Testing & Diagnostics Suite](#8-testing--diagnostics-suite)
+9. [Tailscale Serve HTTPS & iPhone PWA Setup](#9-tailscale-serve-https--iphone-pwa-setup)
 10. [Developer Extension Guide (How to Add Features)](#10-developer-extension-guide-how-to-add-features)
 
 ---
 
 ## 1. Executive Summary & Core Value
 
-This project is a personal AI productivity operating system built specifically for **Andrei** to interact seamlessly with his Notion **"Life Hub"** workspace and Notion Calendar across two primary modalities:
+This project is a personal AI productivity assistant built specifically for **Andrei** to interact with his Notion **"Life Hub"** workspace and Notion Calendar.
 
-1. **Mobile / Everywhere (Telegram Bot)**:
-   - Chat with a personalized AI assistant on Telegram via text or **native voice notes**.
-   - Gemini autonomously queries and modifies Notion databases, retrieves schedules, appends to daily journals, and tracks workouts.
-   - Automatically generates and sends a motivating, structured **Daily Morning Briefing** at 6:00 AM via Telegram and responsive HTML email.
-2. **Desktop (Windows Home Screen Widget)**:
-   - A modern desktop widget adhering to the **Notion DESIGN.md** design language (warm paper canvas `#f6f5f4`, clean white cards, hairline borders, project sticker pills, Inter typography).
-   - Floats or pins to the desktop, provides instant optimistic check-offs, expandable note previews, quick inline task entry, search/filtering, and system tray minimization.
+**Primary Interface**: An installable, mobile-first Progressive Web App (PWA) optimized for iPhone, iPad, and Windows, featuring in-app voice notes via `MediaRecorder`, treadmill display workout scanning with interactive confirmations, morning briefings, and Web Push notifications.
+
+**Optional Fallback**: Telegram bot (`ENABLE_TELEGRAM=false` by default).
 
 **Key Design Principle: $0 Infrastructure Cost**
 Runs entirely on free tiers:
-- Telegram Bot API (Free)
+- Local Windows hosting exposed securely via Tailscale Serve (Free Private HTTPS)
 - Google Gemini 2.5 / 3.x Flash via Google AI Studio API (Free Tier)
 - Notion API v1 (Free Internal Integration)
-- Email via Resend REST API (Free Tier: 3,000 emails/month) or standard Gmail/Outlook SMTP
-- Hosting: Render / Railway / Koyeb Free Background Workers or locally on Windows PC
+- Web Push via browser VAPID (Free)
+- Email via Resend REST API (Free Tier) or standard Gmail/Outlook SMTP
 
 ---
 
 ## 2. End-to-End System Architecture
 
 ```
-                                  ┌────────────────────────────────────────────────────────┐
-                                  │                  ANDREI'S USER FLOW                    │
-                                  └────────────────────────────────────────────────────────┘
-                                               │                               │
-                      [ 📱 Mobile Phone (Telegram) ]           [ 💻 Windows PC Desktop ]
-                                   │                                           │
-                   (Text Messages / Voice Audio Notes)               (Interactive GUI Widget)
-                                   │                                           │
-                                   ▼                                           ▼
-                    ┌──────────────────────────────┐            ┌──────────────────────────────┐
-                    │     telegram_bot.py          │            │  widget/electron/main.ts     │
-                    │  - User Whitelist Auth       │            │  - Frameless Glass Window    │
-                    │  - HTML Formatting Engine    │            │  - Tray & Global Shortcuts   │
-                    │  - Daily 6:00 AM Scheduler   │            │  - JSON Config Store         │
-                    └──────────────┬───────────────┘            └──────────────┬───────────────┘
-                                   │                                           │
-                    ┌──────────────▼───────────────┐            ┌──────────────▼───────────────┐
-                    │     gemini_agent.py          │            │  widget/src/App.tsx (React)  │
-                    │  - Google GenAI SDK (v1.0+)  │            │  - Optimistic State Updates  │
-                    │  - 6-Tier Model Fallback     │            │  - Project Sticker Filters   │
-                    │  - Voice Audio Decoder       │            │  - Task Preview Drawer       │
-                    └──────────────┬───────────────┘            └──────────────┬───────────────┘
-                                   │ (Function Calling)                        │ (Direct Node Client)
-                                   │                                           │
-                    ┌──────────────▼───────────────┐            ┌──────────────▼───────────────┐
-                    │     notion_service.py        │            │ widget/electron/             │
-                    │  - Query Databases           │            │   notion-client.ts           │
-                    │  - Manage Calendar & Tasks   │            │  - Tasks & Projects Sync     │
-                    │  - Page Content & Append     │            │  - Status & Preview Handler  │
-                    └──────────────┬───────────────┘            └──────────────┬───────────────┘
-                                   │                                           │
-                                   └─────────────────────┬─────────────────────┘
-                                                         │ (HTTPS Notion API)
-                                                         ▼
-                                       ┌───────────────────────────────────┐
-                                       │     NOTION CLOUD WORKSPACE        │
-                                       │  - Tasks Database                 │
-                                       │  - Projects Database              │
-                                       │  - Workstreams & Notes            │
-                                       │  - Calendar Schedule              │
-                                       └───────────────────────────────────┘
-
-                    ┌──────────────────────────────┐
-                    │     email_service.py         │ ───► [ 📧 Andrei's Email Inbox ]
-                    │  - Responsive Newsletter HTML│      (Daily Morning Briefings & Alerts)
-                    │  - Resend REST API / SMTP    │
-                    └──────────────────────────────┘
+[ 📱 iPhone / iPad (Safari PWA) ] ────── [ 💻 Windows / Desktop Browser ]
+              │                                      │
+              │  (Touch, In-App Voice, Camera)       │  (Desktop Web, Mic)
+              ▼                                      ▼
+     [ 🔒 Tailscale Serve (Free End-to-End HTTPS: https://<node>.ts.net) ]
+                                     │
+                                     ▼
+                    ┌─────────────────────────────────┐
+                    │    FASTAPI BACKEND (server/)    │
+                    │  - PBKDF2/HMAC Session Auth     │
+                    │  - Security Headers & CSRF      │
+                    │  - In-App Voice & Workout Scans │
+                    │  - VAPID Web Push Notifications │
+                    │  - Daily Briefing Scheduler     │
+                    └───────┬─────────────────┬───────┘
+                            │                 │
+              ┌─────────────▼───┐       ┌─────▼──────────┐
+              │ SQLite Database │       │ Agent Registry │
+              │ data/life_hub.db│       │ ('notion' ...) │
+              └─────────────────┘       └─────┬──────────┘
+                                              │
+                      ┌───────────────────────▼──────┐
+                      │    TRANSPORT-NEUTRAL CORE    │
+                      │  (assistant_service.py)      │
+                      └───────┬───────────────┬──────┘
+                              │               │
+      ┌───────────────────────▼─────┐   ┌─────▼────────────────────────┐
+      │   GOOGLE GEMINI 2.5/3 FLASH │   │      notion_service.py       │
+      │   - 6-Tier Resilient Chain  │   │  - Tasks, Calendar, Projects │
+      │   - Dynamic Tool Execution  │   │  - Notes, Thought Inbox      │
+      │   - Treadmill OCR & Valid.  │   │  - Daily Health & Workout    │
+      └─────────────────────────────┘   └──────────────┬───────────────┘
+                                                       │ (HTTPS API)
+                                                       ▼
+[ 📱 Telegram Bot (Optional) ] ───► [ NOTION CLOUD WORKSPACE ("Life Hub") ]
+(telegram_bot.py, secondary fallback)
 ```
 
 ---
@@ -112,54 +90,79 @@ Runs entirely on free tiers:
 ```
 NOTION/
 ├── config.py                      # Centralized configuration with dynamic .env reload & auth checking
-├── telegram_bot.py                # Main Telegram bot daemon, commands, voice handler, scheduler, health server
-├── gemini_agent.py                # Gemini AI agent, 6-tier fallback, multimodal audio, Notion function tools
+├── gemini_agent.py                # Gemini AI engine, 6-tier fallback, multimodal audio, Notion function tools
 ├── notion_service.py              # Python service layer wrapping official notion-client SDK & schema mapping
 ├── email_service.py               # HTML email templating engine and SMTP / Resend API dispatcher
-├── test_connections.py            # Diagnostic script validating Notion, Gemini, and Email connectivity
-├── test_bot.py                    # Interactive test runner for quick terminal prompts
-├── start_widget.bat               # Windows batch launcher (installs, builds, and launches Desktop Widget)
-├── requirements.txt               # Python package dependencies
-├── Procfile                       # Deployment process definition (worker: python telegram_bot.py)
-├── Dockerfile                     # Docker container configuration for cloud hosting
-├── render.yaml                    # Infrastructure-as-code for 1-click Render cloud deployment
-├── README.md                      # Public-facing quickstart and features overview
-├── ONBOARDING.md                  # Detailed developer & AI architecture guide (THIS FILE)
+├── telegram_bot.py                # Decoupled Telegram bot daemon (optional secondary interface)
+├── generate_password_hash.py      # CLI tool for generating PBKDF2-HMAC-SHA256 password hashes
+├── generate_vapid_keys.py         # CLI tool for generating Web Push VAPID key pairs
+├── backup_database.py             # Live SQLite online backup snapshot utility (backups/)
+├── restore_database.py            # SQLite database restore utility from snapshot
+├── run_dev.bat                    # 1-click Windows launcher for Vite dev server + Uvicorn reload
+├── run_prod.bat                   # 1-click Windows launcher for production build + Uvicorn server
+├── requirements.txt               # Backend Python dependencies (FastAPI, Uvicorn, pywebpush, pytest, etc.)
 │
-└── widget/                        # Modern Windows Desktop Widget (React 19 + Electron + TypeScript)
-    ├── package.json               # Node.js dependencies (@notionhq/client, react 19, electron, tailwind)
-    ├── tsconfig.json              # TypeScript compiler configuration
-    ├── vite.config.ts             # Vite build & Electron bundling configuration
-    ├── tailwind.config.js         # Notion Design System color palette, typography & shadows
-    ├── index.html                 # HTML shell for Electron renderer
-    ├── icon.png                   # System tray and application window icon
-    ├── start.bat                  # Local launcher from within widget folder
-    │
-    ├── electron/                  # Electron Main Process (Node / Native Layer)
-    │   ├── main.ts                # Window creation, bounds persistence, tray menu, global shortcut, IPC
-    │   ├── preload.ts             # Secure contextBridge exposing window.electronAPI to React
-    │   ├── preload.cjs            # CommonJS build output for preload
-    │   ├── notion-client.ts       # Direct Notion SDK integration for fast desktop syncing
-    │   └── types.ts               # Shared TypeScript interfaces for IPC & Notion data structures
-    │
-    ├── src/                       # React 19 Frontend (Renderer Layer)
-    │   ├── main.tsx               # React DOM root mounting
-    │   ├── App.tsx                # Main widget application state, filter/search logic, keyboard hooks
-    │   ├── index.css              # Tailwind base, Notion font imports, scrollbar styling
-    │   ├── lib/
-    │   │   ├── types.ts           # Frontend TypeScript types (NotionTask, NotionProject, WidgetConfig)
-    │   │   └── notion-theme.ts    # Notion project sticker palettes (color mapping, tags, borders)
-    │   └── components/
-    │       ├── Header.tsx         # Draggable header, sync indicator, pin toggle, settings/minimize triggers
-    │       ├── DailyProgress.tsx  # Visual completion bar ("4 of 8 Completed · 50%")
-    │       ├── FilterBar.tsx      # Today/Active/All tabs, search input, project sticker pill selector
-    │       ├── TaskItem.tsx       # Individual task row with interactive status check, project pill, expand button
-    │       ├── TaskPreviewDrawer.tsx # Expandable drawer rendering child blocks and markdown content
-    │       ├── InlineTaskAdd.tsx  # Quick "+ New task..." input row at list bottom
-    │       ├── QuickAddModal.tsx  # Full modal dialog for task creation with project & due date picker
-    │       └── SettingsModal.tsx  # Widget preferences (opacity, always on top, auto-refresh interval)
-    │
-    └── legacy_python_widget/      # Archived CustomTkinter/Python desktop widget (superseded by Electron)
+├── server/                        # FastAPI Backend & Core Services
+│   ├── main.py                    # FastAPI application, security middleware, SPA static mount & lifespan
+│   ├── database.py                # SQLite schema management (WAL mode, busy timeout, foreign keys)
+│   ├── models.py                  # Strongly-typed internal persistence dataclasses
+│   ├── schemas.py                 # Pydantic request & response API contracts
+│   ├── auth.py                    # PBKDF2 password hashing, HMAC-signed session cookies, rate limiting
+│   ├── dependencies.py            # FastAPI dependencies for auth, user resolution, CSRF validation
+│   ├── routes/                    # API Route Handlers
+│   │   ├── auth.py                # /api/auth/login, /api/auth/logout, /api/auth/session
+│   │   ├── agents.py              # /api/agents (Agent discovery & capability enumeration)
+│   │   ├── conversations.py       # /api/conversations (CRUD, history list, delete)
+│   │   ├── messages.py            # /api/conversations/{id}/messages (Send text, assistant dispatch)
+│   │   ├── media.py               # /api/conversations/{id}/attachments, image scan confirmation
+│   │   ├── notifications.py       # /api/notifications (Web Push subscribe, test, briefing trigger)
+│   │   └── health.py              # /api/health (System status, Notion & Gemini health check)
+│   └── services/                  # Business Logic Services
+│       ├── agent_registry.py      # Transport-neutral agent registry (default: 'notion' Life Hub)
+│       ├── assistant_service.py   # Core turn orchestrator with rolling SQLite conversation history
+│       ├── conversation_service.py# Conversation CRUD, message persistence, user scoping
+│       ├── workout_scan_service.py# Image validation, Gemini workout analysis, pending review cards
+│       ├── briefing_service.py    # Manila-time daily morning briefing generator & dispatcher
+│       └── web_push_service.py    # VAPID Web Push notifications dispatcher & stale sub cleanup
+│
+├── web/                           # Mobile-First Progressive Web App (PWA)
+│   ├── index.html                 # Viewport cover, iOS standalone meta tags, theme color
+│   ├── package.json               # React 18, TypeScript, Tailwind CSS, Lucide icons, Vite
+│   ├── vite.config.ts             # Vite configuration with proxy to FastAPI backend
+│   ├── tailwind.config.js         # Notion color palette, hairline borders, safe-area utilities
+│   ├── public/
+│   │   ├── manifest.webmanifest   # PWA manifest with standalone display and app metadata
+│   │   ├── sw.js                  # Service worker: app shell cache, network fallback, push notifications
+│   │   └── icons/                 # PWA icons (icon-192, icon-512, icon-maskable-512, apple-touch-icon)
+│   └── src/
+│       ├── types/index.ts         # TypeScript interfaces & API contracts
+│       ├── lib/api.ts             # Typed fetch API client with credentials & CSRF handling
+│       ├── lib/sanitize.ts        # Markdown rendering with marked + DOMPurify sanitization
+│       ├── hooks/                 # Custom React hooks (useAuth, useConversations, useMediaRecorder)
+│       ├── components/            # React UI Components (Header, ConversationDrawer, Timeline,
+│       │                          #   MessageComposer, MessageItem, PendingScanCard, LoginModal,
+│       │                          #   IosInstallGuide, PushNotificationModal)
+│       ├── App.tsx                # Main application component & layout state
+│       └── main.tsx               # Entry point & Service Worker registration
+│
+├── tests/                         # Automated Unit & E2E Test Suite (65+ tests)
+│   ├── test_server_auth.py        # PBKDF2 hashing, rate limits, cookie sessions
+│   ├── test_server_conversations.py # Conversation isolation, message ordering, duplicate prevention
+│   ├── test_server_assistant.py   # Assistant dispatch, tool calling, error sanitization
+│   ├── test_server_media.py       # Magic bytes validation, voice notes, attachment serving
+│   ├── test_server_workout_scan.py# Scan review cards, token confirm/edit/cancel
+│   ├── test_server_notifications_and_briefings.py # Web push subscriptions & morning briefing
+│   ├── test_server_e2e_mobile.py  # End-to-end simulated mobile workflow
+│   ├── test_gemini_image.py       # Gemini workout extraction
+│   ├── test_image_models.py       # Pydantic workout validation schemas
+│   ├── test_notion_workout.py     # Notion Daily Health database upserts
+│   └── test_telegram_images.py    # Telegram image handler unit tests
+│
+├── Dockerfile                     # Docker container configuration running FastAPI on port 8000
+├── Procfile                       # Process definition for web hosting (web: uvicorn server.main:app)
+├── render.yaml                    # Cloud deployment specification
+├── README.md                      # Public-facing documentation & quickstart
+└── ONBOARDING.md                  # Detailed developer & AI architecture guide (THIS FILE)
 ```
 
 ---
@@ -194,200 +197,164 @@ In `notion_service.py`, `_normalize_key()` and `_format_property_val()` automati
 
 ---
 
-## 5. Telegram Bot & AI Engine
+## 5. Web PWA & Shared Backend Architecture
 
-### Gemini Agent & Multi-Tier Fallback
+### FastAPI & Security Layer
 
-Located in [`gemini_agent.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/gemini_agent.py), the `GeminiNotionAgent` class uses the modern `google-genai` Python SDK (`from google import genai`).
+Located in [`server/`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/), the backend is built on **FastAPI** with a fail-closed single-user security model:
 
-#### Multi-Tier Resilience Architecture
-To prevent downtime from free-tier rate limits or transient model hiccups, queries attempt execution through a prioritized cascade:
-
-1. **Gemini 3.5 Flash Lite** (`gemini-3.5-flash-lite`) — Ultra-fast, minimal latency.
-2. **Gemini 3.1 Flash Lite** (`gemini-3.1-flash-lite`) — Stable high-efficiency tier.
-3. **Gemini Flash Lite Latest** (`gemini-flash-lite-latest`) — Latest production lite release.
-4. **Gemini 3 Flash** (`gemini-3-flash-preview`) — Full Gemini 3 reasoning speed.
-5. **Gemini 3.7 Flash** (`gemini-3.7-flash`) — Cutting-edge multimodal model.
-6. **Gemini 2.5 Flash** (`gemini-2.5-flash`) — Battle-tested reliable fallback.
-
-If a fallback model is used, the response discreetly appends `_⚡ Handled via <Model Name> fallback_`.
-
-#### Conversation History
-Maintains rolling history per `user_id` up to 20 turns. If a corrupt state or bad request occurs, history is automatically reset for self-healing.
-
----
-
-### Autonomous Function Calling / Tool Registry
-
-The agent provides Gemini with native Python tools:
-
-```python
-TOOLS = [
-    get_calendar_schedule,  # Fetches scheduled items for target date (YYYY-MM-DD)
-    search_notion,          # Workspace-wide search for pages & databases
-    get_page_content,       # Reads child blocks formatted as Markdown
-    query_database,         # Queries items with filtering
-    create_database_item,   # Creates a row with title, properties, & body
-    update_page_properties, # Updates status (Done, In Progress), priority, date
-    append_to_page,         # Appends bullet, todo, or paragraph blocks
-    create_new_page         # Creates standalone child pages
-]
-```
-
-Gemini autonomously decides when to query the calendar, search for project pages, create tasks, or read notes.
+1. **PBKDF2-HMAC-SHA256 Password Authentication**:
+   - Password hashes use 600,000 iterations of PBKDF2 with a cryptographically secure 16-byte random salt (`server/auth.py`). Compatible with Argon2 fallback.
+   - Verified in constant time via `hmac.compare_digest`.
+2. **Brute-Force & Credential Stuffing Protection**:
+   - In-memory sliding-window rate limiter tracks failed login attempts by client IP.
+   - Exceeding 5 failed attempts locks the IP out for 15 minutes.
+3. **Cryptographically Signed Session Cookies**:
+   - Sessions are signed with HMAC-SHA256 using `WEB_SESSION_SECRET`.
+   - Set as `HttpOnly`, `SameSite=Lax`, and `Secure` (in HTTPS production).
+   - Valid for 30 days (`WEB_SESSION_DAYS`).
+4. **Strict CSRF & Origin Verification**:
+   - `server/dependencies.py` enforces Origin and Referer header checks on all state-changing HTTP verbs (`POST`, `PUT`, `PATCH`, `DELETE`) against `WEB_ALLOWED_ORIGINS`.
+5. **Security Headers Middleware**:
+   - `Content-Security-Policy`: Disallows untrusted external script execution.
+   - `X-Frame-Options: DENY`: Prevents clickjacking.
+   - `X-Content-Type-Options: nosniff`: Mitigates MIME-sniffing exploits.
+   - `Referrer-Policy: strict-origin-when-cross-origin`.
+   - `Permissions-Policy: microphone=(self), camera=(self), geolocation=()`.
+6. **Upload Magic-Byte Verification**:
+   - `server/routes/media.py` enforces both file size caps (<= 15 MiB) and binary file signature checks (JPEG `FF D8 FF`, PNG `89 50 4E 47`, WebP `RIFF...WEBP`, HEIC/HEIF `ftypheic`, audio `webm`, `mp4`, `ogg`).
 
 ---
 
-### Multimodal Voice-to-Action Pipeline
+### Agent Registry & Transport-Neutral Assistant
 
-1. Andrei sends a voice message or audio clip on Telegram.
-2. `telegram_bot.py` downloads the audio buffer as an in-memory byte stream (`audio/ogg`).
-3. Audio bytes are passed directly into Gemini via `types.Part.from_bytes(data=audio_bytes, mime_type="audio/ogg")` with live date/time context.
-4. Gemini transcribes the speech, extracts intent (e.g. "Add a reminder for Friday to back up files"), executes the appropriate Notion tool, and confirms the action.
+Located in [`server/services/assistant_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/services/assistant_service.py) and [`server/services/agent_registry.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/services/agent_registry.py):
 
----
-
-### Image-to-Notion Workout Pipeline
-
-1. An authorized user sends a Telegram photo or image document. Authentication is checked before any file download.
-2. `telegram_bot.py` accepts JPEG, PNG, WebP, HEIC, and HEIF files up to 15 MiB, downloads the highest-resolution image into memory, and passes its bytes and caption to Gemini.
-3. `gemini_agent.py` treats visible image text as untrusted data and returns a Pydantic-validated `ImageAnalysis`. Treadmill fields include date, duration, distance, steps, calories, speed, heart rate, program, workout type, confidence, and uncertainty markers.
-4. Deterministic validators enforce plausible numeric ranges. Complete scans at 90% confidence or higher are eligible for automatic saving; uncertain scans display Telegram **Save**, **Edit**, and **Cancel** controls that expire after 10 minutes.
-5. `notion_service.py` upserts one `Daily Health & Workout Log` row per date. Missing treadmill values are filled automatically, while conflicting existing values require explicit confirmation and unrelated health fields are never modified.
-6. After a create or update, the original source image is uploaded to Notion and appended to the daily page. Metric writes remain saved if the attachment fails. Exact database matches are treated as duplicates and receive no additional image block.
-7. Non-treadmill images are described but cannot write to Notion. The router is intentionally extensible for future receipt, task-list, calendar, and note handlers.
-
-Image bytes remain in memory only and are discarded after completion, cancellation, or expiry. The bot retains Telegram file identifiers in process memory for 24 hours to suppress immediate reprocessing; no audit properties are added to the Notion data source.
-
----
-
-### Automated Morning Briefing Scheduler
-
-- In `telegram_bot.py`, an async background task `daily_briefing_scheduler()` runs indefinitely.
-- Targets `DAILY_BRIEFING_TIME` (default `06:00` AM, `UTC_OFFSET_HOURS=8.0` for Asia/Manila).
-- Workflow:
-  1. Queries today's Notion tasks & schedule.
-  2. Gemini synthesizes a structured executive summary:
-     - ☀️ **Morning Greeting & Date**
-     - 📋 **Today's Priorities & Schedule** (crisp breakdown of tasks/deadlines)
-     - 🏃 **Health & Fitness Prompt** (treadmill walk, health check-in)
-     - ⚡ **Daily Motivation** (short philosophical quote or focus reminder)
-  3. Sends formatted Telegram HTML message to all `ALLOWED_TELEGRAM_USER_IDS`.
-  4. If email is configured, sends a responsive HTML email newsletter to `NOTIFICATION_EMAIL_TO`.
+- **Transport Neutrality**: AI logic is completely decoupled from whether the user connects via PWA, API, or optional Telegram.
+- **Agent Registry**:
+  - Initializes with the default `'notion'` agent: **Life Hub Assistant**.
+  - Provides a clean interface (`IAgent`) allowing Andrei or future developers to plug in specialized agents (e.g. Code Agent, Finance Agent, Fitness Agent) without modifying routing or persistence code.
+- **Multi-Tier Gemini Fallback Chain**:
+  - Automatically handles free-tier rate limits and model hiccups by cascading through 6 prioritized tiers:
+    1. `gemini-3.5-flash-lite` (Fastest, low latency)
+    2. `gemini-3.1-flash-lite` (Stable high efficiency)
+    3. `gemini-flash-lite-latest` (Production lite release)
+    4. `gemini-3-flash-preview` (Full reasoning speed)
+    5. `gemini-3.7-flash` (Multimodal)
+    6. `gemini-2.5-flash` (Rock-solid fallback)
+- **Autonomous Notion Tool Calling**:
+  - Native tools include: `get_calendar_schedule`, `search_notion`, `get_page_content`, `query_database`, `create_database_item`, `update_page_properties`, `append_to_page`, `create_new_page`, and `create_database` (supports custom properties and view layouts: table, list, board, gallery, calendar, timeline).
+- **Rolling Context Window**:
+  - Rehydrates conversation turns directly from the SQLite `messages` table, pruning to the latest 20 turns with token-budget protection.
 
 ---
 
-### Email Service (HTML Newsletters & Alerts)
+### SQLite Persistence & Idempotency
 
-Located in [`email_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/email_service.py):
-- **Template**: Styled with dark header gradients, clean white content cards, left accent borders (Blue for priorities, Green for health, Amber for motivation), and a direct button linking to Notion Life Hub.
-- **Transports**:
-  - **Resend REST API**: Uses `RESEND_API_KEY` (primary high-speed delivery).
-  - **SMTP**: Fallback to standard SMTP (`smtp.gmail.com:587` with STARTTLS).
+Located in [`server/database.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/database.py) and [`server/services/conversation_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/services/conversation_service.py):
 
----
-
-### Telegram HTML Formatting Engine
-
-Telegram's Markdown parser is notoriously fragile with unescaped underscores and special characters. `telegram_bot.py` includes a custom parser (`format_for_telegram`):
-1. Safely protects `<pre>` and `<code>` blocks using unique placeholder tags.
-2. Escapes HTML entities (`<`, `>`, `&`).
-3. Formats bullet points (`* ` / `- ` -> `• `).
-4. Converts headers (`#`, `##`, `###`) into bold headers (`<b>...</b>`).
-5. Translates markdown links `[text](url)` to `<a href="url">text</a>`.
-6. Translates `**bold**`, `_italics_`, and horizontal dividers (`───────────────`).
-7. Restores clean code blocks with proper syntax highlighting.
-
----
-
-### Security & Whitelisting Protocol
-
-- **Fail-Closed Auth**: `config.py` evaluates `settings.is_authorized(user_id)`. If `ALLOWED_TELEGRAM_USER_IDS` is empty or the user ID does not match, all requests receive immediate **403 Access Denied**.
-- **Anti-Leak System Prompt**: Instructions explicitly forbid revealing API keys, tokens, or system configuration to anyone, even if prompted with jailbreaks.
-- **Embedded Health Check Server**: An HTTP server runs on `PORT` (8000) answering `GET /` with `{"status":"healthy"}` to satisfy cloud hosting health probes (Render, Railway, Koyeb).
+- Database file: `data/life_hub.db` (automatically created, gitignored).
+- **SQLite Engine Configuration**:
+  - WAL mode (`PRAGMA journal_mode=WAL`) enabled for high-concurrency read/write operations.
+  - Foreign key constraints enabled (`PRAGMA foreign_keys=ON`).
+  - Busy timeout set to 5000ms to prevent lock contention.
+- **Tables**:
+  - `users`: Single-user credentials and role.
+  - `sessions`: Active session tokens, expiry, client IP, and user-agent metadata.
+  - `conversations`: Conversation threads scoped by agent (`agent_id`) and user.
+  - `messages`: Message turns (`role`, `content`, `tool_calls`, `client_message_id`).
+  - `attachments`: In-app voice notes and camera photos with file metadata and MIME types.
+  - `pending_image_scans`: Pending workout scans awaiting interactive confirmation.
+  - `push_subscriptions`: Browser VAPID endpoints and authentication keys for Web Push.
+  - `briefing_deliveries`: Delivery audit log preventing duplicate morning briefings per day.
+- **Network Idempotency**:
+  - PWA generates a unique `client_message_id` for every outgoing message.
+  - If a mobile connection stutters and retries, the backend returns the existing message without re-invoking Gemini or creating duplicate Notion entries.
+- **Live Snapshots & Recovery**:
+  - `python backup_database.py`: Performs a non-blocking online SQLite backup to `backups/life_hub_YYYYMMDD_HHMMSS.db`.
+  - `python restore_database.py <snapshot>`: Restores state with safety checks.
 
 ---
 
-## 6. Windows Desktop Home Screen Widget
+### Workout Confirmation Pipeline
 
-The widget in `widget/` is a native desktop application built with **React 19, TypeScript, Electron 34, and Tailwind CSS**.
+Located in [`server/services/workout_scan_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/services/workout_scan_service.py):
 
-### Tech Stack & Design Philosophy
-
-- **Notion Design System (DESIGN.md)**:
-  - Canvas: `#f6f5f4` (warm paper)
-  - Card Surface: `#ffffff` with hairline border `#e6e6e6`
-  - Notion Blue: `#0075de`
-  - Subtle micro-shadows (`0 1px 2px rgba(0,0,0,0.04)`)
-  - Project Sticker Pills (`#d3e5ef` blue, `#dbeddb` green, `#fdecc8` yellow, `#f1e0ec` pink, `#eedbf3` purple)
-  - Tight-tracked typography (`Inter`, system fonts)
-
----
-
-### IPC Communication Contract
-
-The Electron main process (`widget/electron/main.ts`) and React frontend communicate via `window.electronAPI` exposed through `widget/electron/preload.ts`:
-
-```typescript
-export interface IElectronAPI {
-  // Configuration
-  getConfig: () => Promise<WidgetConfig>;
-  saveConfig: (updates: Partial<WidgetConfig>) => Promise<WidgetConfig>;
-  
-  // Window & System Controls
-  minimize: () => void;
-  close: () => void;
-  setAlwaysOnTop: (isTop: boolean) => void;
-  openExternalUrl: (url: string) => void;
-  
-  // Notion Data Actions
-  getProjects: () => Promise<NotionProject[]>;
-  getTasks: (targetDate?: string) => Promise<NotionTask[]>;
-  updateTaskStatus: (taskId: string, newStatus: string) => Promise<boolean>;
-  createTask: (title: string, projectId?: string, priority?: string, doDate?: string) => Promise<NotionTask>;
-  getPagePreview: (pageId: string) => Promise<PagePreviewData>;
-  
-  // Event Listeners (Push from Main to Renderer)
-  onTriggerRefresh: (callback: () => void) => () => void;
-  onTriggerQuickAdd: (callback: () => void) => () => void;
-  onConfigUpdated: (callback: (cfg: Partial<WidgetConfig>) => void) => () => void;
-}
-```
+1. **Capture & Upload**: User takes or attaches a photo of the treadmill console from iPhone PWA or desktop.
+2. **Sanitization & Extraction**: Magic bytes and file size are verified. Gemini extracts structured metrics into a Pydantic `ImageAnalysis` schema:
+   - Date, duration, distance, steps, calories, speed, heart rate, program, confidence score.
+3. **Range & Plausibility Validation**: Enforces sanity checks (e.g. speed <= 25 km/h, heart rate 40-220 bpm, calories <= 3000).
+4. **Notion Conflict Detection**: Queries Notion's `Daily Health & Workout Log` for existing entries on the target date.
+5. **Interactive Review Card**:
+   - Generates a pending scan record with a secure 10-minute token.
+   - PWA renders a rich review card with metric badges, confidence indicator, and conflict warnings.
+   - Actions:
+     - **Save to Notion**: Confirms and upserts the metrics into Notion's `Daily Health & Workout Log` and attaches the image.
+     - **Edit Values**: Allows manual adjustment of speed, distance, or duration before committing.
+     - **Cancel**: Discards the pending scan and cleans up the temporary upload.
 
 ---
 
-### Key Interactive Features
+### Web Push & Briefing Scheduler
 
-1. **Optimistic Check-Offs**: Clicking the status circle toggles `Not started` -> `Done` instantly in the React state while syncing to Notion in the background. If sync fails, the state automatically reverts with an error banner.
-2. **Page Preview Drawer**: Clicking any task expands an accordion drawer that reads child blocks (paragraphs, headers, todo checkboxes) directly from Notion without opening a browser.
-3. **Daily Progress Metric**: Displays a progress bar with dynamic counts (e.g. `5 of 10 Completed · 50%`).
-4. **Smart Filtering**:
-   - Filter Tabs: `Today` (today's scheduled tasks), `Active` (all pending tasks), `All`.
-   - Project Sticker Chips: Filter tasks by specific project with 1 click.
-   - Instant Search: Real-time substring filter on task names and projects.
-5. **Creation Methods**:
-   - **Inline Quick Add**: Fast input bar at the bottom (`+ New task...` + Enter).
-   - **Detailed Modal**: `+` button in the header opens full project selector and date picker.
-6. **Global Shortcut & System Tray**:
-   - `Ctrl+Shift+T` toggles widget visibility globally across Windows.
-   - Minimizing or closing docks the widget cleanly to the Windows System Tray.
-   - Right-click tray menu: "Show Tasks", "Refresh Tasks", "Add Task for Today", "Always on Top", "Launch on Windows Startup", "Exit".
+Located in [`server/services/web_push_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/services/web_push_service.py) and [`server/services/briefing_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/services/briefing_service.py):
+
+- **VAPID Web Push**:
+  - Implements RFC 8291 / 8292 using `pywebpush`.
+  - Fully compatible with iOS 16.4+ standalone PWAs added to Home Screen.
+  - Generates notifications for morning briefings, workout confirmations, and reminders.
+  - Automatically detects 404/410 GCM/APNs responses and purges expired subscriptions.
+- **Automated Morning Briefing**:
+  - Background scheduler runs in the FastAPI lifespan loop targeting 06:00 AM (Asia/Manila time, UTC+8).
+  - Fetches today's tasks and calendar events from Notion.
+  - Gemini synthesizes an executive summary: priorities, schedule, health focus, and daily motivation.
+  - Automatically records the briefing to the in-app timeline, sends a Web Push alert, and sends an HTML email newsletter if configured.
 
 ---
 
-## 7. Configuration & Environment Variables
+### Telegram Bot (Decoupled Secondary Fallback)
 
-Environment variables are defined in `.env` in the root folder. Both the Python services and the Electron widget auto-load this file.
+Located in [`telegram_bot.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/telegram_bot.py):
+
+- Fully decoupled: defaults to `ENABLE_TELEGRAM=false`.
+- If enabled with `ENABLE_TELEGRAM=true` and a valid token, runs as an optional secondary interface for quick mobile input.
+- Shares the underlying `gemini_agent.py` and `notion_service.py` functions without conflicting with the web server.
+
+---
+
+## 6. Configuration & Environment Variables
+
+Create or update `.env` in the repository root:
 
 ```env
 # ==============================================================================
-# TELEGRAM BOT CONFIGURATION
+# WEB APP & SECURITY CONFIGURATION
 # ==============================================================================
-# Token from @BotFather on Telegram
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+# PBKDF2 hash of your web login password (generate with: python generate_password_hash.py)
+WEB_PASSWORD_HASH=pbkdf2:sha256:600000$salt$hash
 
-# Whitelist of allowed Telegram User IDs (from @userinfobot). Comma-separated for multiple.
-ALLOWED_TELEGRAM_USER_IDS=1234567890
+# Random secret string for HMAC session cookie signing (at least 32 characters)
+WEB_SESSION_SECRET=generate_a_long_random_secret_string_here_32chars
+
+# Allowed CORS & CSRF origins (comma-separated). Include your Tailscale Serve domain.
+WEB_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8000,http://127.0.0.1:8000,https://andrei-pc.tailscale.net
+
+# Session cookie lifetime in days (default: 30)
+WEB_SESSION_DAYS=30
+
+# Path to SQLite database file
+DATABASE_PATH=data/life_hub.db
+
+# Path to uploaded media attachments
+UPLOAD_DIR=uploads
+
+# ==============================================================================
+# WEB PUSH NOTIFICATIONS (VAPID)
+# ==============================================================================
+# Generate with: python generate_vapid_keys.py
+WEB_PUSH_VAPID_PUBLIC_KEY=your_vapid_public_key_base64
+WEB_PUSH_VAPID_PRIVATE_KEY=your_vapid_private_key_base64
+WEB_PUSH_CONTACT=mailto:andrei@example.com
 
 # ==============================================================================
 # AI ENGINE CONFIGURATION (GOOGLE GEMINI)
@@ -406,136 +373,171 @@ NOTION_API_KEY=ntn_your_notion_api_key_here
 # ==============================================================================
 # Enable/disable automated 6:00 AM daily briefing (true/false)
 DAILY_BRIEFING_ENABLED=true
-
-# Scheduled briefing time in 24-hour HH:MM format
 DAILY_BRIEFING_TIME=06:00
-
-# Local timezone offset from UTC (Default: 8 for Asia/Manila)
 UTC_OFFSET_HOURS=8
 
 # ==============================================================================
-# EMAIL NOTIFICATIONS & MORNING NEWSLETTER (OPTIONAL)
+# EMAIL NOTIFICATIONS (OPTIONAL)
 # ==============================================================================
-# Enable/disable email notifications (true/false)
-EMAIL_NOTIFICATIONS_ENABLED=true
-
-# Recipient email address
+EMAIL_NOTIFICATIONS_ENABLED=false
 NOTIFICATION_EMAIL_TO=andrei@example.com
-
-# Method 1: Resend API (Recommended - fast & modern)
 RESEND_API_KEY=re_your_resend_api_key_here
 
-# Method 2: Standard SMTP (Gmail / Outlook / SendGrid)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your_email@gmail.com
-SMTP_PASSWORD=your_app_specific_password_here
-EMAIL_FROM_NAME=Andrei's Notion AI Assistant
-EMAIL_FROM_ADDRESS=briefing@notion-assistant.app
+# ==============================================================================
+# TELEGRAM BOT (OPTIONAL SECONDARY FALLBACK)
+# ==============================================================================
+ENABLE_TELEGRAM=false
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+ALLOWED_TELEGRAM_USER_IDS=1234567890
 
 # ==============================================================================
-# CLOUD HOSTING & PORT BINDING
+# SERVER PORT
 # ==============================================================================
 PORT=8000
 ```
 
 ---
 
-## 8. Getting Started & Local Execution
+## 7. Getting Started & Local Execution
 
 ### Prerequisites
 - **Python 3.12+** or **Python 3.14+**
 - **Node.js 20+** and **npm**
-- Active Notion integration connected to your Notion pages (Click `•••` -> **Connections** -> Select your Integration in Notion).
+- Active Notion integration added to your Notion `Life Hub` workspace page.
 
 ---
 
-### Step 1: Install Python Dependencies
+### Step 1: Install Backend Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### Step 2: Validate API Connections
-Run the diagnostic suite to confirm Notion, Gemini, and Email credentials work:
+### Step 2: Build the Frontend PWA
+```bash
+cd web
+npm install
+npm run build
+cd ..
+```
+
+### Step 3: Generate Security Credentials
+```bash
+# 1. Generate password hash for your access password:
+python generate_password_hash.py -p your_secure_password_here
+
+# 2. Generate VAPID keys for Web Push:
+python generate_vapid_keys.py
+```
+Copy the outputs into your `.env` file.
+
+### Step 4: Validate Connections
 ```bash
 python test_connections.py
 ```
 
-### Step 3: Run the Telegram Bot
-```bash
-python telegram_bot.py
-```
-
-### Step 4: Run the Windows Desktop Widget
-
-**Option A: 1-Click Batch File (Recommended)**
-Double-click `start_widget.bat` in the project root. It will install packages, build the bundle, and open the widget.
-
-**Option B: Manual Terminal Execution**
-```bash
-cd widget
-npm install
-npm run build
-npm run start
-```
-
-**Option C: Vite Live-Reload Dev Mode**
-```bash
-cd widget
-npm run dev
-```
+### Step 5: Launch the Application
+- **Production Mode (Recommended)**:
+  Double-click `run_prod.bat` or run:
+  ```bash
+  python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
+  ```
+  The production server serves both the FastAPI API and the compiled React PWA from `web/dist`.
+- **Development Mode**:
+  Double-click `run_dev.bat` to launch Vite on port 5173 with hot-reloading and FastAPI on port 8000 with auto-reload.
 
 ---
 
-## 9. Testing & Diagnostics Suite
+## 8. Testing & Diagnostics Suite
 
-| Test Command | Purpose |
+The repository includes a comprehensive automated test suite covering all critical services, security mechanisms, and user flows:
+
+```bash
+# Run the complete test suite:
+python -m pytest tests -v
+```
+
+### Test Coverage Summary
+
+| Test File | Verified Functionality |
 | :--- | :--- |
-| `python test_connections.py` | Tests Notion API connection, Gemini model response, and email readiness. |
-| `python test_bot.py` | Runs a dry-run prompt through the Gemini Agent without Telegram. |
-| `python -m unittest discover -s tests -v` | Runs image validation, Gemini fallback, Notion upsert, attachment, authorization, and Telegram workflow unit tests. |
-| `python -c "import config; print(config.settings.ALLOWED_TELEGRAM_USER_IDS)"` | Checks parsed Telegram user ID whitelist. |
+| `tests/test_server_auth.py` | PBKDF2 password hashing, rate limiting, session cookie signing, CSRF protection. |
+| `tests/test_server_conversations.py` | Conversation creation, message sequencing, idempotent retry handling (`client_message_id`). |
+| `tests/test_server_assistant.py` | Transport-neutral dispatch, tool calling, error sanitization, context window rolling. |
+| `tests/test_server_media.py` | Magic bytes binary validation, audio voice notes, photo attachments, path traversal protection. |
+| `tests/test_server_workout_scan.py` | Treadmill scan review flow, token confirmation, manual value edits, cancellation. |
+| `tests/test_server_notifications_and_briefings.py` | VAPID push subscriptions, duplicate briefing prevention, manual briefing trigger. |
+| `tests/test_server_e2e_mobile.py` | Full simulated iPhone session: login -> voice note -> workout scan -> save -> timeline check. |
+| `tests/test_gemini_image.py` | Gemini treadmill OCR extraction accuracy. |
+| `tests/test_image_models.py` | Pydantic schema validation for workout metrics. |
+| `tests/test_notion_workout.py` | Notion `Daily Health & Workout Log` upsert logic. |
+| `tests/test_telegram_images.py` | Telegram photo and callback query handlers. |
 
-### Telegram In-App Commands
-- `/start` — Introduction & quick-action summary.
-- `/help` — Example prompts for schedule, fitness tracking, and notes.
-- `/status` — Verifies live Notion connection, accessible pages count, and active Gemini tiers.
-- `/briefing` or `/briefing now` — Generates today's morning briefing immediately.
-- `/briefing email` — Dispatches today's briefing to your email inbox.
-- `/email status` — Inspects email provider (Resend vs SMTP) and recipient settings.
-- `/email test` — Sends an immediate test email to verify delivery.
-- Send a treadmill photo — Extracts workout statistics, auto-saves validated records, or presents Save/Edit/Cancel when review is needed.
+---
+
+## 9. Tailscale Serve HTTPS & iPhone PWA Setup
+
+Tailscale Serve provides a **100% free, end-to-end encrypted HTTPS URL** backed by a valid Let's Encrypt certificate directly on your Windows PC, enabling iOS Safari PWA installation without opening router ports or buying domains.
+
+### Step 1: Install Tailscale on Windows & iPhone
+1. Install [Tailscale for Windows](https://tailscale.com/download/windows) and sign in.
+2. Install [Tailscale for iOS](https://apps.apple.com/app/tailscale/id1470499037) on your iPhone and sign in with the same account.
+3. Verify MagicDNS is active in your Tailscale admin console.
+
+### Step 2: Enable Tailscale Serve on Windows
+Run this command in PowerShell as Administrator:
+```powershell
+tailscale serve --bg 8000
+```
+Tailscale outputs your private HTTPS URL, for example:
+```
+https://andrei-pc.tailscale.net
+```
+
+### Step 3: Configure Allowed Origins
+Add your Tailscale URL to `.env`:
+```env
+WEB_ALLOWED_ORIGINS="http://localhost:8000,https://andrei-pc.tailscale.net"
+```
+
+### Step 4: Install on iPhone
+1. Open **Safari** on your iPhone.
+2. Navigate to `https://andrei-pc.tailscale.net`.
+3. Log in with your password.
+4. Tap the **Share** button in Safari's bottom toolbar.
+5. Tap **"Add to Home Screen"** and confirm.
+6. Launch **"Life Hub"** from your Home Screen. It opens in full-screen standalone mode with native iOS gestures, safe-area padding, and in-app voice/camera recording!
 
 ---
 
 ## 10. Developer Extension Guide (How to Add Features)
 
-### A. Adding a New Tool to the Gemini Agent
-1. Open [`notion_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/notion_service.py) and add the Notion client logic.
-2. Open [`gemini_agent.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/gemini_agent.py):
-   - Define a tool function with clear docstrings explaining argument formats.
-   - Add the function name to the `TOOLS` list.
-3. Restart `telegram_bot.py`. Gemini will automatically begin calling the new tool when relevant.
+### A. Adding a New Agent to the Registry
+1. Implement the `IAgent` protocol in `server/services/agent_registry.py`:
+   ```python
+   class MySpecializedAgent:
+       id = "finance"
+       name = "Finance Assistant"
+       description = "Tracks expenses and budgets in Notion."
+       system_instruction = "..."
+       tools = [...]
+   ```
+2. Register the agent in `AgentRegistry`:
+   ```python
+   registry.register(MySpecializedAgent())
+   ```
+3. The PWA's agent dropdown in the header will automatically discover and display the new agent!
 
-### B. Adding a New Database to the Assistant
-1. Find the Notion database ID (from the Notion URL).
-2. Add the ID and its corresponding data source ID into `KNOWN_DATA_SOURCES` in [`notion_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/notion_service.py) and [`widget/electron/notion-client.ts`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/widget/electron/notion-client.ts).
-3. If specific property normalizations are required, update `_normalize_key()` and `_format_property_val()`.
+### B. Adding a New Tool to the Notion Assistant
+1. Implement the Notion API call in [`notion_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/notion_service.py).
+2. Define the tool function with detailed docstrings in [`gemini_agent.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/gemini_agent.py).
+3. Add the function to `TOOLS` in `gemini_agent.py`. Gemini will autonomously invoke it when relevant.
 
-### C. Modifying the Desktop Widget UI
-1. All React components reside in `widget/src/components/`.
-2. Design tokens (colors, radii, shadows) are defined in `widget/tailwind.config.js` and `widget/src/lib/notion-theme.ts`.
-3. To expose new native OS features or Notion queries to the widget:
-   - Add the IPC handler in `widget/electron/main.ts`.
-   - Expose the method in `widget/electron/preload.ts`.
-   - Declare the TypeScript signature in `widget/src/lib/types.ts`.
-   - Call `window.electronAPI.yourMethod()` in React.
-4. Run `npm run build` in `widget/` to compile changes.
+### C. Adding a New Database to the Workspace
+1. Locate the Notion database UUID from your Notion URL.
+2. Add the UUID and its corresponding Data Source ID into `KNOWN_DATA_SOURCES` in [`notion_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/notion_service.py).
+3. If property normalization is required, update `_normalize_key()` and `_format_property_val()`.
 
----
-
-## 💡 Quick Tips for Future AI Agents
-
-- **Modifying System Prompt**: The system prompt for Gemini is in `gemini_agent.py` under `SYSTEM_INSTRUCTION`. Keep Telegram formatting rules and confidentiality guardrails intact.
-- **Handling Free Tier Rate Limits**: The 6-tier fallback mechanism in `_execute_turn()` ensures high reliability. If adding models, add them to `MODEL_TIERS`.
-- **Notion 2025/2026 API Versioning**: When querying databases, the Notion API sometimes requires queries to hit the `data_source` endpoint instead of `databases/{id}/query`. Both `notion_service.py` and `notion-client.ts` include automatic data-source resolution fallbacks. Keep this pattern for all new database operations.
+### 💡 Quick Tips for Future AI Agents
+- **Notion 2025/2026 API Versioning**: When querying databases, the Notion API often requires querying the `data_source` endpoint rather than `databases/{id}/query`. `notion_service.py` includes automatic fallback logic. Maintain this pattern for all new database operations.
+- **Windows SQLite Locks**: When running tests on Windows, open database handles can trigger `WinError 32` during directory cleanup. Always use `TemporaryDirectory(ignore_cleanup_errors=True)` and explicitly close test clients.
+- **Frontend Code Quality**: The frontend is built with strict TypeScript (`noImplicitAny: true`). Always run `cd web && npx tsc --noEmit && npm run build` after modifying UI code.
