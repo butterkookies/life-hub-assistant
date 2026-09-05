@@ -7,12 +7,13 @@
     
     <!-- PWA & Mobile Meta Tags -->
     <meta name="description" content="Personal AI Assistant for Andrei's Notion Workspace" />
-    <meta name="theme-color" content="#fbfbfa" />
-    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8f9fb" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#090a0f" />
+    <meta name="color-scheme" content="light dark" />
     
     <!-- iOS Specific Metadata -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Life Hub" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 
@@ -25,7 +26,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   </head>
-  <body class="h-full bg-notion-bg text-notion-text antialiased selection:bg-notion-blueLight selection:text-notion-blue">
+  <body class="h-full bg-surface-bg text-content-primary antialiased selection:bg-brand-blueLight selection:text-brand-blue">
     <div id="root" class="h-full"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

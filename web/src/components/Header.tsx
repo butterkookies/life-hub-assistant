@@ -31,7 +31,7 @@ export const Header: React.FC<HeaderProps> = ({
   const currentAgent = agents.find((a) => a.id === selectedAgentId) || agents[0];
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between border-b border-surface-borderSubtle bg-surface-bg/80 px-3 sm:px-4 py-2.5 backdrop-blur-md pt-safe">
+    <header className="sticky top-0 z-30 flex items-center justify-between px-3 sm:px-4 py-2 pt-[max(0.75rem,env(safe-area-inset-top))] bg-gradient-to-b from-surface-bg/70 via-surface-bg/30 to-transparent backdrop-blur-xs transition-colors">
       {/* Left: Drawer Toggle */}
       <div className="flex items-center space-x-2">
         <button
