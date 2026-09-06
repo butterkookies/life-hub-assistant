@@ -1,17 +1,15 @@
-"""SQLite persistence layer for Andrei's Life Hub Assistant."""
+"""SQLite development and PostgreSQL production persistence."""
 
 import contextlib
-import os
 import sqlite3
+import threading
 from pathlib import Path
-from typing import Generator
+from typing import Any, Generator, Optional, Sequence
+
 from config import settings
 
-SCHEMA_SQL = """
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 5000;
 
+TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT UNIQUE NOT NULL,
@@ -94,13 +92,77 @@ CREATE TABLE IF NOT EXISTS briefing_deliveries (
     UNIQUE(delivery_date, channel, recipient)
 );
 
+CREATE TABLE IF NOT EXISTS briefing_runs (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    delivery_date TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    error_message TEXT,
+    PRIMARY KEY(user_id, delivery_date)
+);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS object_cleanup_queue (
+    object_key TEXT PRIMARY KEY,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations(user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_messages_client_id ON messages(conversation_id, client_message_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_client_id
+    ON messages(conversation_id, client_message_id)
+    WHERE client_message_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_sessions_user_expires ON sessions(user_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_pending_scans_user ON pending_image_scans(user_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
 """
+
+SQLITE_SCHEMA_SQL = """
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
+""" + TABLES_SQL
+
+
+def _postgres_sql(sql: str) -> str:
+    """Convert the project's DB-API qmark placeholders for psycopg."""
+    return sql.replace("?", "%s")
+
+
+class DatabaseConnection:
+    """Small common surface used by SQLite and psycopg connections."""
+
+    def __init__(self, raw: Any, postgres: bool = False):
+        self.raw = raw
+        self.postgres = postgres
+
+    def execute(self, sql: str, params: Sequence[Any] = ()):
+        statement = _postgres_sql(sql) if self.postgres else sql
+        return self.raw.execute(statement, tuple(params))
+
+    def commit(self) -> None:
+        self.raw.commit()
+
+    def rollback(self) -> None:
+        self.raw.rollback()
+
+
+_pool: Any = None
+_pool_url: Optional[str] = None
+_pool_lock = threading.Lock()
+
+
+def is_postgres() -> bool:
+    return bool(settings.DATABASE_URL)
+
 
 def get_db_path() -> str:
     path = settings.DATABASE_PATH
@@ -108,35 +170,112 @@ def get_db_path() -> str:
     db_file.parent.mkdir(parents=True, exist_ok=True)
     return str(db_file.resolve())
 
+
 def get_upload_dir() -> str:
     path = settings.UPLOAD_DIR
     upload_dir = Path(path)
     upload_dir.mkdir(parents=True, exist_ok=True)
     return str(upload_dir.resolve())
 
+
+def _get_postgres_pool():
+    global _pool, _pool_url
+    url = settings.DATABASE_URL
+    if not url:
+        raise RuntimeError("DATABASE_URL is not configured")
+    with _pool_lock:
+        if _pool is None or _pool_url != url:
+            if _pool is not None:
+                _pool.close()
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+
+            _pool = ConnectionPool(
+                conninfo=url,
+                min_size=0,
+                max_size=5,
+                timeout=10,
+                kwargs={"row_factory": dict_row},
+                open=True,
+            )
+            _pool.wait(timeout=15)
+            _pool_url = url
+    return _pool
+
+
+def close_db() -> None:
+    global _pool, _pool_url
+    with _pool_lock:
+        if _pool is not None:
+            _pool.close()
+        _pool = None
+        _pool_url = None
+
+
 def init_db() -> None:
-    """Initialize SQLite database with schema and ensure default user exists."""
-    db_path = get_db_path()
+    """Initialize the selected database and ensure the primary user exists."""
     get_upload_dir()
-    
+    if is_postgres():
+        with get_db() as conn:
+            for statement in TABLES_SQL.split(";"):
+                if statement.strip():
+                    conn.execute(statement)
+            conn.execute(
+                """
+                INSERT INTO users (id, username, created_at)
+                VALUES ('andrei-main', 'andrei', CURRENT_TIMESTAMP::text)
+                ON CONFLICT(id) DO NOTHING
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO schema_migrations (version, applied_at)
+                VALUES (1, CURRENT_TIMESTAMP::text)
+                ON CONFLICT(version) DO NOTHING
+                """
+            )
+        return
+
+    db_path = get_db_path()
     with sqlite3.connect(db_path) as conn:
-        conn.executescript(SCHEMA_SQL)
-        # Ensure standard primary user exists
+        conn.executescript(SQLITE_SCHEMA_SQL)
         conn.execute(
             """
-            INSERT OR IGNORE INTO users (id, username, created_at)
+            INSERT INTO users (id, username, created_at)
             VALUES ('andrei-main', 'andrei', datetime('now'))
+            ON CONFLICT(id) DO NOTHING
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO schema_migrations (version, applied_at)
+            VALUES (1, datetime('now'))
+            ON CONFLICT(version) DO NOTHING
             """
         )
         conn.commit()
 
+
 @contextlib.contextmanager
-def get_db() -> Generator[sqlite3.Connection, None, None]:
-    """Context manager for SQLite connections with row factory and foreign keys."""
+def get_db() -> Generator[DatabaseConnection, None, None]:
+    """Yield a transactional connection with mapping-style result rows."""
+    if is_postgres():
+        pool = _get_postgres_pool()
+        with pool.connection() as raw:
+            conn = DatabaseConnection(raw, postgres=True)
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return
+
     db_path = get_db_path()
-    conn = sqlite3.connect(db_path, timeout=10.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    raw = sqlite3.connect(db_path, timeout=10.0)
+    raw.row_factory = sqlite3.Row
+    raw.execute("PRAGMA foreign_keys = ON")
+    conn = DatabaseConnection(raw)
     try:
         yield conn
         conn.commit()
@@ -144,4 +283,4 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
         conn.rollback()
         raise
     finally:
-        conn.close()
+        raw.close()

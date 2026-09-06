@@ -17,9 +17,92 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+export type ServerStatus = 'checking' | 'waking' | 'ready' | 'offline' | 'unavailable';
+
+let serverStatus: ServerStatus = 'checking';
+let wakePromise: Promise<void> | null = null;
+const statusListeners = new Set<(status: ServerStatus) => void>();
+
+function setServerStatus(next: ServerStatus) {
+  if (serverStatus === next) return;
+  serverStatus = next;
+  statusListeners.forEach((listener) => listener(next));
+}
+
+export function getServerStatus(): ServerStatus {
+  return serverStatus;
+}
+
+export function subscribeServerStatus(listener: (status: ServerStatus) => void): () => void {
+  statusListeners.add(listener);
+  listener(serverStatus);
+  return () => {
+    statusListeners.delete(listener);
+  };
+}
+
+const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function probeHealth(): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch('/api/health', {
+      cache: 'no-store',
+      credentials: 'include',
+      signal: controller.signal,
+    });
+    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) {
+      return false;
+    }
+    const data = await response.json();
+    return data.status === 'healthy' && data.database_ok === true;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+export async function ensureServerReady(forceProbe = false): Promise<void> {
+  if (!navigator.onLine) {
+    setServerStatus('offline');
+    throw new ApiError('You are offline. Reconnect to continue.', 'OFFLINE', 0);
+  }
+  if (!forceProbe && serverStatus === 'ready') return;
+  if (wakePromise) return wakePromise;
+
+  wakePromise = (async () => {
+    setServerStatus('waking');
+    const deadline = Date.now() + 90000;
+    while (Date.now() < deadline) {
+      if (!navigator.onLine) {
+        setServerStatus('offline');
+        throw new ApiError('You are offline. Reconnect to continue.', 'OFFLINE', 0);
+      }
+      if (await probeHealth()) {
+        setServerStatus('ready');
+        return;
+      }
+      await delay(3000);
+    }
+    setServerStatus('unavailable');
+    throw new ApiError('Life Hub is taking longer than expected to wake. Tap Retry.', 'SERVER_UNAVAILABLE', 503);
+  })().finally(() => {
+    wakePromise = null;
+  });
+
+  return wakePromise;
+}
+
+interface RequestPolicy {
+  retryMutation?: boolean;
+}
+
+async function request<T>(endpoint: string, options: RequestInit = {}, policy: RequestPolicy = {}): Promise<T> {
   const isFormData = options.body instanceof FormData;
   const headers = new Headers(options.headers || {});
+  const method = (options.method || 'GET').toUpperCase();
 
   if (!isFormData && !headers.has('Content-Type') && options.method && options.method !== 'GET') {
     headers.set('Content-Type', 'application/json');
@@ -31,20 +114,52 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.set('Origin', origin);
   }
 
-  const res = await fetch(endpoint, {
-    ...options,
-    headers,
-    credentials: 'include',
-  });
+  await ensureServerReady(method !== 'GET');
+
+  const attempts = method === 'GET' || policy.retryMutation ? 2 : 1;
+  let res: Response | null = null;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      res = await fetch(endpoint, {
+        ...options,
+        headers,
+        credentials: 'include',
+      });
+      const transient = [502, 503, 504].includes(res.status);
+      const isJson = res.headers.get('content-type')?.includes('application/json');
+      if ((!isJson || transient) && attempt + 1 < attempts) {
+        setServerStatus('waking');
+        await delay(1500 * (attempt + 1));
+        await ensureServerReady(true);
+        continue;
+      }
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 >= attempts) break;
+      setServerStatus(navigator.onLine ? 'waking' : 'offline');
+      await delay(1500 * (attempt + 1));
+      await ensureServerReady(true);
+    }
+  }
+
+  if (!res) {
+    setServerStatus(navigator.onLine ? 'unavailable' : 'offline');
+    throw lastError instanceof ApiError
+      ? lastError
+      : new ApiError('Could not reach Life Hub. Please retry.', navigator.onLine ? 'SERVER_UNAVAILABLE' : 'OFFLINE', 0);
+  }
 
   if (!res.ok) {
     let errCode = 'HTTP_ERROR';
     let errMsg = `Request failed with status ${res.status}`;
     try {
       const data = await res.json();
-      if (data.error) {
-        errCode = data.error.code || errCode;
-        errMsg = data.error.message || errMsg;
+      const detail = data.error || data.detail;
+      if (detail) {
+        errCode = detail.code || errCode;
+        errMsg = detail.message || errMsg;
       }
     } catch {
       // Body not JSON
@@ -52,6 +167,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     throw new ApiError(errMsg, errCode, res.status);
   }
 
+  if (!res.headers.get('content-type')?.includes('application/json')) {
+    setServerStatus('waking');
+    throw new ApiError('Life Hub is still waking. Please retry.', 'SERVER_WAKING', 503);
+  }
+
+  setServerStatus('ready');
   return (await res.json()) as T;
 }
 
@@ -97,7 +218,7 @@ export const api = {
           client_message_id: clientMessageId,
           attachment_ids: attachmentIds,
         }),
-      }),
+      }, { retryMutation: Boolean(clientMessageId) }),
   },
 
   media: {

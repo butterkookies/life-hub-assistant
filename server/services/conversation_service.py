@@ -12,6 +12,7 @@ from server.schemas import (
     ConversationSummary,
     MessageResponse,
 )
+from server.storage import object_storage
 
 class ConversationService:
     def list_conversations(self, user_id: str) -> List[ConversationSummary]:
@@ -161,12 +162,24 @@ class ConversationService:
 
     def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
         """Delete conversation and cascade delete its messages and attachments."""
+        storage_keys: List[str] = []
         with get_db() as db:
+            storage_keys = [
+                str(row["file_path"])
+                for row in db.execute(
+                    "SELECT file_path FROM attachments WHERE conversation_id = ? AND user_id = ?",
+                    (conversation_id, user_id),
+                ).fetchall()
+            ]
             cursor = db.execute(
                 "DELETE FROM conversations WHERE id = ? AND user_id = ?",
                 (conversation_id, user_id)
             )
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+        if deleted:
+            for key in storage_keys:
+                object_storage.delete_quietly(key)
+        return deleted
 
     def find_message_by_client_id(
         self, conversation_id: str, user_id: str, client_message_id: str

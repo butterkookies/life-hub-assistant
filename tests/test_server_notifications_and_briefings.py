@@ -3,7 +3,7 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 from starlette.testclient import TestClient
 
 from config import settings
@@ -35,6 +35,7 @@ class ServerNotificationsAndBriefingsTests(unittest.IsolatedAsyncioTestCase):
             "WEB_PUSH_VAPID_PUBLIC_KEY": "test-vapid-public-key",
             "WEB_PUSH_VAPID_PRIVATE_KEY": "test-vapid-private-key",
             "WEB_PUSH_CONTACT": "mailto:andrei@test.local",
+            "BRIEFING_TRIGGER_TOKEN": "scheduler-test-token",
             "ENABLE_TELEGRAM": "false",
             "TELEGRAM_BOT_TOKEN": ""
         })
@@ -156,6 +157,30 @@ class ServerNotificationsAndBriefingsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(row)
             self.assertIn("Good morning Andrei!", row["content"])
 
+        repeated = await briefing_service.dispatch_briefing(user_id="andrei-main", target_date="2026-09-04")
+        self.assertEqual(repeated["status"], "already_completed")
+        with get_db() as db:
+            count = db.execute(
+                "SELECT COUNT(id) AS count FROM messages WHERE client_message_id = ?",
+                ("briefing:2026-09-04",),
+            ).fetchone()["count"]
+        self.assertEqual(count, 1)
+
+    def test_internal_briefing_trigger_requires_bearer_token(self):
+        denied = self.client.post("/api/internal/briefings/daily")
+        self.assertEqual(denied.status_code, 401)
+
+        with patch(
+            "server.routes.internal.briefing_service.dispatch_briefing",
+            new=AsyncMock(return_value={"status": "already_completed", "date": "2026-09-04"}),
+        ):
+            allowed = self.client.post(
+                "/api/internal/briefings/daily",
+                headers={"Authorization": "Bearer scheduler-test-token"},
+            )
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.json()["status"], "already_completed")
+
     def test_health_endpoint(self):
         """Health endpoint returns system status and configuration."""
         res = self.client.get("/api/health")
@@ -164,6 +189,12 @@ class ServerNotificationsAndBriefingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["status"], "healthy")
         self.assertTrue(data["database_ok"])
         self.assertFalse(data["telegram_enabled"])
+
+    def test_health_is_unavailable_when_database_fails(self):
+        with patch("server.routes.health.get_db", side_effect=RuntimeError("database unavailable")):
+            res = self.client.get("/api/health")
+        self.assertEqual(res.status_code, 503)
+        self.assertEqual(res.json()["status"], "degraded")
 
     def test_telegram_disabled_startup(self):
         """telegram_bot.main() exits cleanly without TELEGRAM_BOT_TOKEN when ENABLE_TELEGRAM=false."""

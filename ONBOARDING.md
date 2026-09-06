@@ -29,7 +29,7 @@ Set `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and `WEB_PUSH_CON
 
 Each device must subscribe through Settings > Daily Briefing & Web Push. Windows users should open the hosted app in Chrome or Edge; iPhone users must add the HTTPS app to their Home Screen and open that installed app before granting notification permission. Device status is checked against the current browser subscription, rather than another device's registration. Send Test Notification sends to all registered devices; zero accepted sends is reported as failure. Provider acceptance does not prove display on the device.
 
-The current scheduler runs inside the web server and subscriptions live in SQLite. If using Render's free service configuration, service sleep interrupts scheduling and ephemeral storage can lose subscriptions on restart/deployment. Reliable unattended briefings require a persistent database and an always-running scheduler or an external scheduling service.
+Production subscriptions and conversation state live in Neon PostgreSQL, while uploads use private Cloudflare R2 storage. A Cloudflare Worker wakes the free Render service at 05:58 Asia/Manila and calls the idempotent briefing endpoint at 06:00. The installed PWA serves its cached shell immediately while the backend wakes.
 
 ---
 
@@ -42,7 +42,7 @@ The current scheduler runs inside the web server and subscriptions live in SQLit
 5. [Web PWA & Shared Backend Architecture](#5-web-pwa--shared-backend-architecture)
    - [FastAPI & Security Layer](#fastapi--security-layer)
    - [Agent Registry & Transport-Neutral Assistant](#agent-registry--transport-neutral-assistant)
-   - [SQLite Persistence & Idempotency](#sqlite-persistence--idempotency)
+   - [PostgreSQL/SQLite Persistence & Idempotency](#postgresqlsqlite-persistence--idempotency)
    - [Workout Confirmation Pipeline](#workout-confirmation-pipeline)
    - [Web Push & Briefing Scheduler](#web-push--briefing-scheduler)
 6. [Configuration & Environment Variables](#6-configuration--environment-variables)
@@ -133,7 +133,8 @@ NOTION/
 │
 ├── server/                        # FastAPI Backend & Core Services
 │   ├── main.py                    # FastAPI application, security middleware, SPA static mount & lifespan
-│   ├── database.py                # SQLite schema management (WAL mode, busy timeout, foreign keys)
+│   ├── database.py                # PostgreSQL/SQLite connection adapter and schema management
+│   ├── storage.py                 # Private R2/local object storage adapter
 │   ├── models.py                  # Strongly-typed internal persistence dataclasses
 │   ├── schemas.py                 # Pydantic request & response API contracts
 │   ├── auth.py                    # PBKDF2 password hashing, HMAC-signed session cookies, rate limiting
@@ -161,7 +162,7 @@ NOTION/
 │   ├── tailwind.config.js         # Notion color palette, hairline borders, safe-area utilities
 │   ├── public/
 │   │   ├── manifest.webmanifest   # PWA manifest with standalone display and app metadata
-│   │   ├── sw.js                  # Service worker: app shell cache, network fallback, push notifications
+│   │   ├── sw.ts                  # Injected service worker: precache, navigation fallback, push notifications
 │   │   └── icons/                 # PWA icons (icon-192, icon-512, icon-maskable-512, apple-touch-icon)
 │   └── src/
 │       ├── types/index.ts         # TypeScript interfaces & API contracts
@@ -278,12 +279,13 @@ Located in [`server/services/assistant_service.py`](file:///c:/Users/user/Docume
 
 ---
 
-### SQLite Persistence & Idempotency
+### PostgreSQL/SQLite Persistence & Idempotency
 
 Located in [`server/database.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/database.py) and [`server/services/conversation_service.py`](file:///c:/Users/user/Documents/ANDREI_FILES/NOTION/server/services/conversation_service.py):
 
-- Database file: `data/life_hub.db` (automatically created, gitignored).
-- **SQLite Engine Configuration**:
+- Production database: Neon PostgreSQL through `DATABASE_URL`.
+- Local database: `data/life_hub.db` (automatically created, gitignored).
+- **Local SQLite Engine Configuration**:
   - WAL mode (`PRAGMA journal_mode=WAL`) enabled for high-concurrency read/write operations.
   - Foreign key constraints enabled (`PRAGMA foreign_keys=ON`).
   - Busy timeout set to 5000ms to prevent lock contention.
@@ -296,12 +298,15 @@ Located in [`server/database.py`](file:///c:/Users/user/Documents/ANDREI_FILES/N
   - `pending_image_scans`: Pending workout scans awaiting interactive confirmation.
   - `push_subscriptions`: Browser VAPID endpoints and authentication keys for Web Push.
   - `briefing_deliveries`: Delivery audit log preventing duplicate morning briefings per day.
+  - `briefing_runs`: Date-level dispatch claim preventing duplicate generation across scheduler retries.
+  - `object_cleanup_queue`: Failed R2 deletions retained for retry on the next process start.
 - **Network Idempotency**:
   - PWA generates a unique `client_message_id` for every outgoing message.
   - If a mobile connection stutters and retries, the backend returns the existing message without re-invoking Gemini or creating duplicate Notion entries.
-- **Live Snapshots & Recovery**:
+- **Local Snapshots & Hosted Import**:
   - `python backup_database.py`: Performs a non-blocking online SQLite backup to `backups/life_hub_YYYYMMDD_HHMMSS.db`.
   - `python restore_database.py <snapshot>`: Restores state with safety checks.
+  - `python scripts/migrate_sqlite_to_durable.py`: Imports local records and attachment objects into Neon/R2.
 
 ---
 
@@ -334,7 +339,7 @@ Located in [`server/services/web_push_service.py`](file:///c:/Users/user/Documen
   - Generates notifications for morning briefings, workout confirmations, and reminders.
   - Automatically detects 404/410 GCM/APNs responses and purges expired subscriptions.
 - **Automated Morning Briefing**:
-  - Background scheduler runs in the FastAPI lifespan loop targeting 06:00 AM (Asia/Manila time, UTC+8).
+  - Cloudflare Worker Cron wakes Render at 05:58 and calls `POST /api/internal/briefings/daily` at 06:00 AM (Asia/Manila time, UTC+8).
   - Fetches today's tasks and calendar events from Notion.
   - Gemini synthesizes an executive summary: priorities, schedule, health focus, and daily motivation.
   - Automatically records the briefing to the in-app timeline, sends a Web Push alert, and sends an HTML email newsletter if configured.
@@ -371,11 +376,18 @@ WEB_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8000,http://127.0.0.1
 # Session cookie lifetime in days (default: 30)
 WEB_SESSION_DAYS=30
 
-# Path to SQLite database file
+# Local SQLite path and hosted PostgreSQL URL
 DATABASE_PATH=data/life_hub.db
+DATABASE_URL=postgresql://...
 
-# Path to uploaded media attachments
+# Local upload path and hosted private R2 configuration
 UPLOAD_DIR=uploads
+R2_ENDPOINT_URL=https://ACCOUNT_ID.r2.cloudflarestorage.com
+R2_ACCESS_KEY_ID=your_r2_access_key
+R2_SECRET_ACCESS_KEY=your_r2_secret
+R2_BUCKET=life-hub-uploads
+DURABLE_STORAGE_REQUIRED=true
+BRIEFING_TRIGGER_TOKEN=generate_a_long_random_scheduler_secret
 
 # ==============================================================================
 # WEB PUSH NOTIFICATIONS (VAPID)
@@ -401,7 +413,7 @@ NOTION_API_KEY=ntn_your_notion_api_key_here
 # MORNING BRIEFING & SCHEDULE SETTINGS
 # ==============================================================================
 # Enable/disable automated 6:00 AM daily briefing (true/false)
-DAILY_BRIEFING_ENABLED=true
+DAILY_BRIEFING_ENABLED=false
 DAILY_BRIEFING_TIME=06:00
 UTC_OFFSET_HOURS=8
 

@@ -1,6 +1,5 @@
 """FastAPI main application for Andrei's Life Hub Assistant."""
 
-import asyncio
 import logging
 import os
 import sys
@@ -13,17 +12,18 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from config import settings
-from server.database import init_db
+from server.database import close_db, init_db
 from server.routes import (
     agents,
     auth,
     conversations,
     health,
+    internal,
     media,
     messages,
     notifications,
 )
-from server.services.briefing_service import briefing_service
+from server.storage import object_storage
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -57,24 +57,26 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Initialize SQLite database & directories
+    if settings.DURABLE_STORAGE_REQUIRED:
+        missing = []
+        if not settings.DATABASE_URL:
+            missing.append("DATABASE_URL")
+        if not object_storage.is_remote():
+            missing.append("R2 configuration")
+        if not settings.BRIEFING_TRIGGER_TOKEN:
+            missing.append("BRIEFING_TRIGGER_TOKEN")
+        if missing:
+            raise RuntimeError(f"Missing required production persistence: {', '.join(missing)}")
+
     logger.info("Initializing Life Hub database...")
     init_db()
-
-    # 2. Start independent briefing scheduler task
-    briefing_task = None
-    if settings.DAILY_BRIEFING_ENABLED:
-        briefing_task = asyncio.create_task(briefing_service.start_scheduler())
+    object_storage.validate()
+    cleaned = object_storage.retry_pending_deletes()
+    if cleaned:
+        logger.info("Completed %s queued object-storage deletions", cleaned)
 
     yield
-
-    # Shutdown
-    if briefing_task:
-        briefing_task.cancel()
-        try:
-            await briefing_task
-        except asyncio.CancelledError:
-            pass
+    close_db()
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -128,6 +130,7 @@ def create_app() -> FastAPI:
 
     # 4. Include API Routers
     app.include_router(health.router)
+    app.include_router(internal.router)
     app.include_router(auth.router)
     app.include_router(agents.router)
     app.include_router(conversations.router)

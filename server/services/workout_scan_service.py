@@ -4,10 +4,8 @@ import asyncio
 import functools
 import json
 import logging
-import os
 import secrets
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from image_models import (
     AttachmentResult,
@@ -19,8 +17,9 @@ from image_models import (
 from config import settings
 from gemini_agent import gemini_agent
 from notion_service import notion_service
-from server.database import get_db, get_upload_dir
+from server.database import get_db
 from server.schemas import PendingScanResponse
+from server.storage import object_storage
 
 logger = logging.getLogger("server.workout_scan_service")
 
@@ -68,14 +67,9 @@ class WorkoutScanService:
                 "SELECT token, image_path FROM pending_image_scans WHERE expires_at < ?",
                 (now_iso,)
             ).fetchall()
-            for r in rows:
-                path = r["image_path"]
-                if os.path.exists(path):
-                    try:
-                        os.remove(path)
-                    except Exception:
-                        pass
             db.execute("DELETE FROM pending_image_scans WHERE expires_at < ?", (now_iso,))
+        for row in rows:
+            object_storage.delete_quietly(str(row["image_path"]))
 
     def get_pending_scan(self, token: str, user_id: str) -> Optional[PendingScanResponse]:
         """Fetch pending scan by token and user_id."""
@@ -151,30 +145,31 @@ class WorkoutScanService:
         expires_at = (now + timedelta(minutes=10)).isoformat()
         now_iso = now.isoformat()
 
-        # Save image file safely
-        upload_dir = Path(get_upload_dir())
-        safe_filename = f"scan_{token}_{Path(filename).name}"
-        file_path = upload_dir / safe_filename
-        file_path.write_bytes(image_bytes)
+        storage_key = object_storage.pending_scan_key(user_id, token, filename)
+        object_storage.put_bytes(storage_key, image_bytes, mime_type)
 
         conflicts_json = json.dumps(shown_conflicts) if shown_conflicts else None
 
-        with get_db() as db:
-            db.execute(
-                """
-                INSERT INTO pending_image_scans (
-                    token, user_id, conversation_id, filename, mime_type,
-                    image_path, analysis_json, awaiting_correction,
-                    shown_conflicts_json, created_at, expires_at
+        try:
+            with get_db() as db:
+                db.execute(
+                    """
+                    INSERT INTO pending_image_scans (
+                        token, user_id, conversation_id, filename, mime_type,
+                        image_path, analysis_json, awaiting_correction,
+                        shown_conflicts_json, created_at, expires_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                    """,
+                    (
+                        token, user_id, conversation_id, filename, mime_type,
+                        storage_key, analysis.model_dump_json(),
+                        conflicts_json, now_iso, expires_at
+                    )
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-                """,
-                (
-                    token, user_id, conversation_id, filename, mime_type,
-                    str(file_path), analysis.model_dump_json(),
-                    conflicts_json, now_iso, expires_at
-                )
-            )
+        except Exception:
+            object_storage.delete_quietly(storage_key)
+            raise
         return token
 
     async def process_image_upload(
@@ -296,8 +291,10 @@ class WorkoutScanService:
             if not scan:
                 raise ValueError("Scan does not contain treadmill values")
 
-            image_path = Path(row["image_path"])
-            image_bytes = image_path.read_bytes() if image_path.exists() else b""
+            try:
+                image_bytes = object_storage.get_bytes(str(row["image_path"]))
+            except Exception:
+                image_bytes = b""
 
             shown_conflicts = None
             if row["shown_conflicts_json"]:
@@ -376,20 +373,18 @@ class WorkoutScanService:
 
     def cancel_scan(self, token: str, user_id: str) -> bool:
         """Cancel and delete pending scan."""
+        storage_key = None
         with get_db() as db:
             row = db.execute(
                 "SELECT image_path FROM pending_image_scans WHERE token = ? AND user_id = ?",
                 (token, user_id)
             ).fetchone()
             if row:
-                path = Path(row["image_path"])
-                if path.exists():
-                    try:
-                        path.unlink()
-                    except Exception:
-                        pass
+                storage_key = str(row["image_path"])
                 db.execute("DELETE FROM pending_image_scans WHERE token = ? AND user_id = ?", (token, user_id))
-                return True
+        if storage_key:
+            object_storage.delete_quietly(storage_key)
+            return True
         return False
 
 workout_scan_service = WorkoutScanService()

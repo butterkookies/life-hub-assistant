@@ -23,7 +23,7 @@ It replaces Telegram as the primary interaction medium while running on a **100%
 - 🌅 **Automated Morning Briefings**: Generates crisp, motivating morning briefings based on today's Notion schedule and tasks (Asia/Manila time, UTC+8), delivered to Web Push, email, or your in-app briefing timeline.
 - 🔔 **Web Push Notifications**: Standards-based Web Push via VAPID (compatible with iOS 16.4+ standalone Home Screen apps).
 - 🔒 **Ironclad Single-User Security**: Password authentication with PBKDF2-HMAC-SHA256 (600,000 rounds), signed HttpOnly Secure cookies, sliding-window rate limiting, CSRF origin verification, and upload magic-byte verification.
-- 🗄️ **Local SQLite Persistence**: Conversations, messages, tool summaries, upload metadata, and pending workout scans persist in `data/life_hub.db` outside version control.
+- 🗄️ **Durable Hosted Persistence**: Production uses Neon PostgreSQL for app records and private Cloudflare R2 objects for uploads; local development keeps the simple SQLite/filesystem setup.
 - ⚡ **$0 Hosting & Infrastructure**: Runs on your Windows computer exposed securely over Tailscale with Tailscale Serve providing free, valid HTTPS.
 
 ---
@@ -39,7 +39,8 @@ It replaces Telegram as the primary interaction medium while running on a **100%
                        ▼
       [ 🚀 FastAPI Application (server/main.py) ]
          ├── Security Headers, CSRF & Cookie Session Auth
-         ├── SQLite Persistence (data/life_hub.db)
+         ├── PostgreSQL Production / SQLite Development
+         ├── Private R2 Production / Local File Development
          ├── Web Push Notification Dispatcher (VAPID)
          │
          ▼
@@ -94,6 +95,14 @@ WEB_PASSWORD_HASH="pbkdf2:sha256:600000$your_salt$your_hash"
 WEB_SESSION_SECRET="your_random_secret_session_key_at_least_32_characters_long"
 WEB_ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000"
 
+# Hosted persistence (leave empty for local SQLite/files)
+DATABASE_URL="postgresql://..."
+R2_ENDPOINT_URL="https://ACCOUNT_ID.r2.cloudflarestorage.com"
+R2_ACCESS_KEY_ID="your_r2_access_key"
+R2_SECRET_ACCESS_KEY="your_r2_secret"
+R2_BUCKET="life-hub-uploads"
+BRIEFING_TRIGGER_TOKEN="a_long_random_scheduler_secret"
+
 # ==============================================================================
 # AI & Notion Keys
 # ==============================================================================
@@ -110,7 +119,7 @@ WEB_PUSH_CONTACT="mailto:your_email@example.com"
 # ==============================================================================
 # Daily Briefings & Schedule (Asia/Manila is UTC+8)
 # ==============================================================================
-DAILY_BRIEFING_ENABLED=true
+DAILY_BRIEFING_ENABLED=false
 DAILY_BRIEFING_TIME=06:00
 UTC_OFFSET_HOURS=8
 
@@ -159,7 +168,7 @@ Tailscale provides private encrypted networking and automatically signs free, tr
 
 ---
 
-## 💾 Database Backups & Restore
+## 💾 Local Database Backups & Hosted Migration
 
 The SQLite database is stored locally in `data/life_hub.db`. Use the automated tools to create crash-safe point-in-time snapshots:
 
@@ -173,13 +182,17 @@ python restore_database.py
 
 # Or restore from a specific file:
 python restore_database.py -f backups/life_hub_backup_20260904_102632.db
+
+# Preview or run the one-time SQLite -> Neon/R2 import:
+python scripts/migrate_sqlite_to_durable.py --dry-run
+python scripts/migrate_sqlite_to_durable.py
 ```
 
 ---
 
 ## 🧪 Testing & Verification Suite
 
-Run the full automated test suite (65+ tests) verifying auth, sessions, CSRF, idempotency, media uploads, workout confirmations, briefing scheduler, and mobile flows:
+Run the full automated test suite (90+ tests) verifying auth, sessions, CSRF, idempotency, media uploads, workout confirmations, briefing scheduler, and mobile flows:
 
 ```bash
 python -m pytest tests

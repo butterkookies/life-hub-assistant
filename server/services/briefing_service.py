@@ -36,10 +36,70 @@ class BriefingService:
         with get_db() as db:
             db.execute(
                 """
-                INSERT OR REPLACE INTO briefing_deliveries (id, delivery_date, channel, recipient, status, delivered_at)
+                INSERT INTO briefing_deliveries (id, delivery_date, channel, recipient, status, delivered_at)
                 VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(delivery_date, channel, recipient) DO UPDATE SET
+                    status = excluded.status,
+                    delivered_at = excluded.delivered_at
                 """,
                 (record_id, delivery_date, channel, recipient, status, now)
+            )
+
+    def claim_run(self, user_id: str, delivery_date: str) -> str:
+        """Claim a date for dispatch, allowing a failed or stale run to resume."""
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        stale_before = (now - timedelta(minutes=20)).isoformat()
+        with get_db() as db:
+            inserted = db.execute(
+                """
+                INSERT INTO briefing_runs (user_id, delivery_date, status, started_at)
+                VALUES (?, ?, 'running', ?)
+                ON CONFLICT(user_id, delivery_date) DO NOTHING
+                """,
+                (user_id, delivery_date, now_iso),
+            )
+            if inserted.rowcount > 0:
+                return "claimed"
+
+            row = db.execute(
+                "SELECT status, started_at FROM briefing_runs WHERE user_id = ? AND delivery_date = ?",
+                (user_id, delivery_date),
+            ).fetchone()
+            if row and row["status"] == "completed":
+                return "already_completed"
+            if row and row["status"] == "running" and str(row["started_at"]) >= stale_before:
+                return "in_progress"
+
+            updated = db.execute(
+                """
+                UPDATE briefing_runs
+                SET status = 'running', started_at = ?, completed_at = NULL, error_message = NULL
+                WHERE user_id = ? AND delivery_date = ? AND status != 'completed'
+                """,
+                (now_iso, user_id, delivery_date),
+            )
+            return "claimed" if updated.rowcount > 0 else "in_progress"
+
+    def complete_run(self, user_id: str, delivery_date: str) -> None:
+        with get_db() as db:
+            db.execute(
+                """
+                UPDATE briefing_runs
+                SET status = 'completed', completed_at = ?, error_message = NULL
+                WHERE user_id = ? AND delivery_date = ?
+                """,
+                (datetime.now(timezone.utc).isoformat(), user_id, delivery_date),
+            )
+
+    def fail_run(self, user_id: str, delivery_date: str, error: Exception) -> None:
+        with get_db() as db:
+            db.execute(
+                """
+                UPDATE briefing_runs SET status = 'failed', error_message = ?
+                WHERE user_id = ? AND delivery_date = ?
+                """,
+                (str(error)[:500], user_id, delivery_date),
             )
 
     async def get_or_create_briefing_conversation(self, user_id: str) -> str:
@@ -70,68 +130,72 @@ class BriefingService:
         tz = timezone(timedelta(hours=settings.UTC_OFFSET_HOURS))
         now_tz = datetime.now(tz)
         date_str = target_date or now_tz.strftime("%Y-%m-%d")
+        claim = self.claim_run(user_id, date_str)
+        if claim != "claimed":
+            return {"status": claim, "date": date_str}
 
-        loop = asyncio.get_running_loop()
-        briefing_text = await loop.run_in_executor(
-            None,
-            gemini_agent.generate_daily_briefing,
-            user_id,
-            date_str
-        )
-
-        conv_id = await self.get_or_create_briefing_conversation(user_id)
-        
-        # Save into conversation so it appears in the app timeline
-        conversation_service.save_message(
-            conversation_id=conv_id,
-            user_id=user_id,
-            role="assistant",
-            content=briefing_text,
-            status="completed"
-        )
-
-        results = {
-            "date": date_str,
-            "conversation_id": conv_id,
-            "web_push_sent": 0,
-            "email_sent": False
-        }
-
-        # 1. Dispatch Web Push (preview only, no sensitive workspace details)
-        if not self.is_delivered(date_str, "web_push", user_id):
-            if web_push_service.is_configured() and web_push_service.is_subscribed(user_id):
-                push_title = f"🌅 Life Hub Briefing — {now_tz.strftime('%A, %b %d')}"
-                push_body = "Your daily schedule and morning briefing is ready in Life Hub."
-                sent_count = web_push_service.send_notification(
-                    user_id=user_id,
-                    title=push_title,
-                    body=push_body,
-                    data={"url": f"/?conversation={conv_id}"}
+        try:
+            loop = asyncio.get_running_loop()
+            conv_id = await self.get_or_create_briefing_conversation(user_id)
+            message_key = f"briefing:{date_str}"
+            existing = conversation_service.find_message_by_client_id(conv_id, user_id, message_key)
+            if existing:
+                briefing_text = existing.content
+            else:
+                briefing_text = await loop.run_in_executor(
+                    None,
+                    gemini_agent.generate_daily_briefing,
+                    user_id,
+                    date_str,
                 )
-                if sent_count > 0:
-                    self.record_delivery(date_str, "web_push", user_id, "delivered")
-                    results["web_push_sent"] = sent_count
+                conversation_service.save_message(
+                    conversation_id=conv_id,
+                    user_id=user_id,
+                    role="assistant",
+                    content=briefing_text,
+                    client_message_id=message_key,
+                    status="completed",
+                )
 
-        # 2. Dispatch Email (if configured)
-        recipient_email = settings.NOTIFICATION_EMAIL_TO
-        if recipient_email and settings.EMAIL_NOTIFICATIONS_ENABLED and email_service.is_configured():
-            if not self.is_delivered(date_str, "email", recipient_email):
-                try:
+            results = {
+                "status": "completed",
+                "date": date_str,
+                "conversation_id": conv_id,
+                "web_push_sent": 0,
+                "email_sent": False,
+            }
+
+            if not self.is_delivered(date_str, "web_push", user_id):
+                if web_push_service.is_configured() and web_push_service.is_subscribed(user_id):
+                    sent_count = web_push_service.send_notification(
+                        user_id=user_id,
+                        title=f"🌅 Life Hub Briefing — {now_tz.strftime('%A, %b %d')}",
+                        body="Your daily schedule and morning briefing is ready in Life Hub.",
+                        data={"url": f"/?conversation={conv_id}"},
+                    )
+                    if sent_count > 0:
+                        self.record_delivery(date_str, "web_push", user_id, "delivered")
+                        results["web_push_sent"] = sent_count
+
+            recipient_email = settings.NOTIFICATION_EMAIL_TO
+            if recipient_email and settings.EMAIL_NOTIFICATIONS_ENABLED and email_service.is_configured():
+                if not self.is_delivered(date_str, "email", recipient_email):
                     success, msg = await loop.run_in_executor(
                         None,
                         email_service.send_briefing_email,
-                        briefing_text
+                        briefing_text,
                     )
                     if success:
                         self.record_delivery(date_str, "email", recipient_email, "delivered")
                         results["email_sent"] = True
-                        logger.info(f"Briefing email delivered to {recipient_email}")
                     else:
-                        logger.warning(f"Briefing email failed: {msg}")
-                except Exception as ex:
-                    logger.error(f"Error sending briefing email: {ex}")
+                        logger.warning("Briefing email failed: %s", msg)
 
-        return results
+            self.complete_run(user_id, date_str)
+            return results
+        except Exception as exc:
+            self.fail_run(user_id, date_str, exc)
+            raise
 
     async def start_scheduler(self) -> None:
         """Background task running continuously to deliver scheduled briefings."""

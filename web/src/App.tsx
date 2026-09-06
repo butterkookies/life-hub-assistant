@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { useConversations } from './hooks/useConversations';
+import { useServerStatus } from './hooks/useServerStatus';
 import { api } from './lib/api';
 import { Agent } from './types';
 import { Header } from './components/Header';
@@ -15,7 +16,8 @@ import { PushNotificationModal } from './components/PushNotificationModal';
 import { DesignKitView } from './components/DesignKitView';
 
 export const App: React.FC = () => {
-  const { session, loading: authLoading, error: authError, login, logout } = useAuth();
+  const { session, loading: authLoading, error: authError, login, logout, refreshSession } = useAuth();
+  const { status: serverStatus, retry: retryServer } = useServerStatus();
   const {
     conversations,
     activeId,
@@ -30,7 +32,7 @@ export const App: React.FC = () => {
     confirmScan,
     correctScan,
     cancelScan,
-  } = useConversations();
+  } = useConversations(session.authenticated);
 
   // Theme Management (Light mode default, with dark mode toggleable)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -153,6 +155,25 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  // Re-register an existing browser subscription after durable storage cutovers or resets.
+  useEffect(() => {
+    if (!session.authenticated || session.push_configured !== true) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    let cancelled = false;
+    const restoreSubscription = async () => {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription && !cancelled) await api.notifications.subscribe(subscription);
+      } catch {
+        // The next authenticated launch retries without interrupting the user.
+      }
+    };
+    void restoreSubscription();
+    return () => { cancelled = true; };
+  }, [session.authenticated, session.push_configured]);
+
   // Fetch registered agents
   useEffect(() => {
     if (session.authenticated) {
@@ -187,12 +208,34 @@ export const App: React.FC = () => {
   };
 
   // 1. Loading screen
-  if (authLoading) {
+  if (authLoading || (!session.authenticated && serverStatus !== 'ready')) {
+    const offline = serverStatus === 'offline';
+    const unavailable = serverStatus === 'unavailable';
     return (
       <div className="flex min-h-screen items-center justify-center bg-surface-bg">
-        <div className="flex flex-col items-center space-y-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-blue border-t-transparent" />
-          <span className="text-xs font-medium text-content-secondary">Loading Life Hub...</span>
+        <div className="flex max-w-xs flex-col items-center space-y-3 px-6 text-center">
+          {!offline && !unavailable && (
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-blue border-t-transparent" />
+          )}
+          <span className="text-sm font-semibold text-content-primary">
+            {offline ? 'You are offline' : unavailable ? 'Life Hub is taking longer to wake' : 'Waking Life Hub…'}
+          </span>
+          <span className="text-xs leading-relaxed text-content-secondary">
+            {offline
+              ? 'Reconnect to the internet, then try again.'
+              : unavailable
+                ? 'Render may still be starting. Your data is safe.'
+                : 'The interface is ready while the assistant reconnects.'}
+          </span>
+          {(offline || unavailable) && (
+            <button
+              type="button"
+              onClick={() => { void retryServer().then(refreshSession).catch(() => undefined); }}
+              className="rounded-xl bg-brand-blue px-4 py-2 text-xs font-semibold text-white"
+            >
+              Retry
+            </button>
+          )}
         </div>
       </div>
     );
@@ -233,6 +276,12 @@ export const App: React.FC = () => {
         isOnline={isOnline}
         userPhoto={userPhoto}
       />
+
+      {serverStatus !== 'ready' && (
+        <div role="status" className="relative z-20 border-b border-notion-borderSubtle bg-notion-blueLight px-4 py-2 text-center text-[11px] font-medium text-notion-blue">
+          {serverStatus === 'offline' ? 'Offline — reconnect to continue' : 'Waking Life Hub… your request will continue shortly'}
+        </div>
+      )}
 
       {/* Main Spacious Conversation Stream */}
       <main className="relative z-10 flex-1 overflow-hidden flex flex-col max-w-3xl w-full mx-auto">

@@ -1,14 +1,15 @@
 """Media upload, voice processing, and image workout scan confirmation routes."""
 
+import asyncio
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
-from server.database import get_db, get_upload_dir
+from fastapi.responses import Response
+from server.database import get_db
 from server.dependencies import get_current_user, verify_origin
 from server.models import User
 from server.schemas import (
@@ -25,6 +26,7 @@ from server.services.workout_scan_service import (
     validate_image_bytes,
     workout_scan_service,
 )
+from server.storage import object_storage
 
 logger = logging.getLogger("server.media")
 
@@ -77,22 +79,24 @@ async def upload_attachment(
     raw_filename = file.filename or "attachment"
     safe_basename = Path(raw_filename).name  # Prevent path traversal
     att_id = str(uuid.uuid4())
-    upload_dir = Path(get_upload_dir())
-    stored_filename = f"{att_id}_{safe_basename}"
-    file_path = upload_dir / stored_filename
-    file_path.write_bytes(file_bytes)
+    storage_key = object_storage.attachment_key(user.id, att_id, safe_basename)
+    await asyncio.to_thread(object_storage.put_bytes, storage_key, file_bytes, declared_mime)
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
     # Save attachment metadata
-    with get_db() as db:
-        db.execute(
-            """
-            INSERT INTO attachments (id, conversation_id, user_id, filename, file_path, mime_type, size_bytes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (att_id, conversation_id, user.id, safe_basename, str(file_path), declared_mime, len(file_bytes), now_iso)
-        )
+    try:
+        with get_db() as db:
+            db.execute(
+                """
+                INSERT INTO attachments (id, conversation_id, user_id, filename, file_path, mime_type, size_bytes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (att_id, conversation_id, user.id, safe_basename, storage_key, declared_mime, len(file_bytes), now_iso)
+            )
+    except Exception:
+        await asyncio.to_thread(object_storage.delete_quietly, storage_key)
+        raise
 
     # 1. Audio / Voice Note Handling
     if declared_mime in SUPPORTED_AUDIO_MIMES or "audio" in declared_mime:
@@ -213,6 +217,9 @@ async def upload_attachment(
                 detail={"code": "IMAGE_SCAN_FAILED", "message": "Could not read image display. Please retry."}
             )
 
+    with get_db() as db:
+        db.execute("DELETE FROM attachments WHERE id = ? AND user_id = ?", (att_id, user.id))
+    await asyncio.to_thread(object_storage.delete_quietly, storage_key)
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail={"code": "UNSUPPORTED_TYPE", "message": f"Unsupported file type: {declared_mime}"}
@@ -236,17 +243,24 @@ async def get_attachment(
                 detail={"code": "ATTACHMENT_NOT_FOUND", "message": "Attachment not found."}
             )
 
-        file_path = Path(row["file_path"])
-        if not file_path.exists():
+        try:
+            content = await asyncio.to_thread(object_storage.get_bytes, str(row["file_path"]))
+        except Exception:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "FILE_MISSING", "message": "Stored file is missing."}
             )
 
-        return FileResponse(
-            path=str(file_path),
-            filename=str(row["filename"]),
-            media_type=str(row["mime_type"])
+        filename = str(row["filename"])
+        encoded_filename = quote(filename, safe="")
+        return Response(
+            content=content,
+            media_type=str(row["mime_type"]),
+            headers={
+                "Content-Disposition": (
+                    f"inline; filename=attachment; filename*=UTF-8''{encoded_filename}"
+                )
+            }
         )
 
 # Image Scan Confirmations

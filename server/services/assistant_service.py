@@ -7,14 +7,38 @@ from typing import Any, Dict, List, Optional
 from google.genai import types
 from config import settings
 from gemini_agent import gemini_agent
-from server.database import get_db
 from server.models import Message
 from server.schemas import AttachmentSummary, MessageResponse
 from server.services.conversation_service import conversation_service
 
 logger = logging.getLogger("server.assistant_service")
 
+
+class MessageStillProcessingError(Exception):
+    """Raised when a replay arrives before its original response is stored."""
+
+
 class AssistantService:
+    def _get_idempotent_reply(
+        self, conversation_id: str, user_id: str, client_message_id: str
+    ) -> Optional[MessageResponse]:
+        reply_id = f"reply:{client_message_id}"
+        reply = conversation_service.find_message_by_client_id(
+            conversation_id, user_id, reply_id
+        )
+        if not reply:
+            return None
+        return MessageResponse(
+            id=reply.id,
+            conversation_id=reply.conversation_id,
+            role="assistant",
+            content=reply.content,
+            status=reply.status,
+            client_message_id=reply.client_message_id,
+            created_at=reply.created_at,
+            error_message=reply.error_message,
+        )
+
     def _rehydrate_gemini_history(self, conversation_id: str) -> None:
         """Rehydrate Gemini chat history from persistent SQLite records if not already in memory."""
         if conversation_id in gemini_agent.histories and gemini_agent.histories[conversation_id]:
@@ -59,40 +83,30 @@ class AssistantService:
                 conversation_id, user_id, client_message_id
             )
             if existing_user_msg:
-                # Find the assistant response that followed this user message
-                with get_db() as db:
-                    reply_row = db.execute(
-                        """
-                        SELECT id, conversation_id, role, content, status, client_message_id,
-                               tool_activity_json, created_at, error_message
-                        FROM messages
-                        WHERE conversation_id = ? AND role = 'assistant' AND created_at >= ?
-                        ORDER BY created_at ASC
-                        LIMIT 1
-                        """,
-                        (conversation_id, existing_user_msg.created_at)
-                    ).fetchone()
-                    if reply_row:
-                        return MessageResponse(
-                            id=str(reply_row["id"]),
-                            conversation_id=str(reply_row["conversation_id"]),
-                            role="assistant",
-                            content=str(reply_row["content"]),
-                            status=reply_row["status"],
-                            client_message_id=reply_row["client_message_id"],
-                            created_at=str(reply_row["created_at"]),
-                            error_message=reply_row["error_message"]
-                        )
+                reply = self._get_idempotent_reply(conversation_id, user_id, client_message_id)
+                if reply:
+                    return reply
+                raise MessageStillProcessingError(client_message_id)
 
         # 2. Save user message to database
-        user_msg = conversation_service.save_message(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            role="user",
-            content=content,
-            client_message_id=client_message_id,
-            attachment_ids=attachment_ids
-        )
+        try:
+            conversation_service.save_message(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                role="user",
+                content=content,
+                client_message_id=client_message_id,
+                attachment_ids=attachment_ids
+            )
+        except Exception:
+            if client_message_id and conversation_service.find_message_by_client_id(
+                conversation_id, user_id, client_message_id
+            ):
+                reply = self._get_idempotent_reply(conversation_id, user_id, client_message_id)
+                if reply:
+                    return reply
+                raise MessageStillProcessingError(client_message_id)
+            raise
 
         # 3. Rehydrate context
         self._rehydrate_gemini_history(conversation_id)
@@ -114,6 +128,7 @@ class AssistantService:
                 user_id=user_id,
                 role="assistant",
                 content=clean_reply,
+                client_message_id=f"reply:{client_message_id}" if client_message_id else None,
                 status="completed"
             )
 
@@ -135,6 +150,7 @@ class AssistantService:
                 user_id=user_id,
                 role="assistant",
                 content=error_content,
+                client_message_id=f"reply:{client_message_id}" if client_message_id else None,
                 status="failed",
                 error_message="AI processing error"
             )

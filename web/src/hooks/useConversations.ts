@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { api, ApiError } from '../lib/api';
 import { ConversationSummary, Message, PendingScan } from '../types';
 
-export function useConversations() {
+export function useConversations(enabled = true) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -28,8 +28,15 @@ export function useConversations() {
   }, [activeId]);
 
   useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
+    if (enabled) {
+      void loadConversations();
+    } else {
+      setConversations([]);
+      setActiveId(null);
+      setMessages([]);
+      setPendingScan(null);
+    }
+  }, [enabled, loadConversations]);
 
   // Load active conversation messages
   const loadActiveMessages = useCallback(async (convId: string) => {

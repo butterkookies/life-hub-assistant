@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from server.dependencies import get_current_user, verify_origin
 from server.models import User
 from server.schemas import MessageResponse, MessageSendRequest
-from server.services.assistant_service import assistant_service
+from server.services.assistant_service import MessageStillProcessingError, assistant_service
 from server.services.conversation_service import conversation_service
 
 router = APIRouter(prefix="/api/conversations/{conversation_id}/messages", tags=["messages"])
@@ -32,12 +32,21 @@ async def send_message(
             detail={"code": "CONVERSATION_NOT_FOUND", "message": "Conversation not found."}
         )
 
-    response = await assistant_service.process_text_message(
-        conversation_id=conversation_id,
-        user_id=user.id,
-        content=content,
-        client_message_id=payload.client_message_id,
-        attachment_ids=payload.attachment_ids
-    )
+    try:
+        response = await assistant_service.process_text_message(
+            conversation_id=conversation_id,
+            user_id=user.id,
+            content=content,
+            client_message_id=payload.client_message_id,
+            attachment_ids=payload.attachment_ids
+        )
+    except MessageStillProcessingError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "MESSAGE_IN_PROGRESS",
+                "message": "This message is still processing. Retry in a moment.",
+            },
+        )
 
     return response

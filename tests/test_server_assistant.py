@@ -8,7 +8,7 @@ from unittest.mock import patch, MagicMock
 from config import settings
 from gemini_agent import gemini_agent
 from server.database import get_db, init_db
-from server.services.assistant_service import assistant_service
+from server.services.assistant_service import MessageStillProcessingError, assistant_service
 from server.services.conversation_service import conversation_service
 
 class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -54,6 +54,45 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.messages[0].content, "What are my tasks today?")
         self.assertEqual(detail.messages[1].role, "assistant")
         self.assertIn("Found 2 tasks", detail.messages[1].content)
+
+    @patch.object(gemini_agent, "process_text_message")
+    async def test_text_message_retry_returns_exact_stored_reply(self, mock_process_text):
+        mock_process_text.return_value = "Created the Notion task once."
+
+        first = await assistant_service.process_text_message(
+            conversation_id=self.conv.id,
+            user_id="andrei-main",
+            content="Create my task",
+            client_message_id="stable-request-1",
+        )
+        repeated = await assistant_service.process_text_message(
+            conversation_id=self.conv.id,
+            user_id="andrei-main",
+            content="Create my task",
+            client_message_id="stable-request-1",
+        )
+
+        self.assertEqual(repeated.id, first.id)
+        self.assertEqual(mock_process_text.call_count, 1)
+        detail = conversation_service.get_conversation_detail("andrei-main", self.conv.id)
+        self.assertEqual(len(detail.messages), 2)
+
+    async def test_text_message_retry_does_not_replay_while_in_progress(self):
+        conversation_service.save_message(
+            self.conv.id,
+            "andrei-main",
+            "user",
+            "Create my task",
+            client_message_id="still-running-1",
+        )
+
+        with self.assertRaises(MessageStillProcessingError):
+            await assistant_service.process_text_message(
+                conversation_id=self.conv.id,
+                user_id="andrei-main",
+                content="Create my task",
+                client_message_id="still-running-1",
+            )
 
     @patch.object(gemini_agent, "process_text_message")
     async def test_gemini_error_sanitization(self, mock_process_text):

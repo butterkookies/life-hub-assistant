@@ -101,6 +101,14 @@ if ('serviceWorker' in navigator && window.location.protocol.startsWith('http'))
       .register('/sw.js')
       .then((reg) => {
         reg.update();
+        if (navigator.serviceWorker.controller) {
+          let refreshing = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (refreshing) return;
+            refreshing = true;
+            window.location.reload();
+          });
+        }
       })
       .catch((err) => {
         console.warn('ServiceWorker registration error:', err);

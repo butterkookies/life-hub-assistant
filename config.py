@@ -171,9 +171,44 @@ class Settings:
         return os.getenv("DATABASE_PATH", "data/life_hub.db").strip()
 
     @property
+    def DATABASE_URL(self) -> str:
+        load_dotenv()
+        return os.getenv("DATABASE_URL", "").strip()
+
+    @property
     def UPLOAD_DIR(self) -> str:
         load_dotenv()
         return os.getenv("UPLOAD_DIR", "data/uploads").strip()
+
+    @property
+    def R2_ENDPOINT_URL(self) -> str:
+        load_dotenv()
+        return os.getenv("R2_ENDPOINT_URL", "").strip()
+
+    @property
+    def R2_ACCESS_KEY_ID(self) -> str:
+        load_dotenv()
+        return os.getenv("R2_ACCESS_KEY_ID", "").strip()
+
+    @property
+    def R2_SECRET_ACCESS_KEY(self) -> str:
+        load_dotenv()
+        return os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
+
+    @property
+    def R2_BUCKET(self) -> str:
+        load_dotenv()
+        return os.getenv("R2_BUCKET", "").strip()
+
+    @property
+    def BRIEFING_TRIGGER_TOKEN(self) -> str:
+        load_dotenv()
+        return os.getenv("BRIEFING_TRIGGER_TOKEN", "").strip()
+
+    @property
+    def DURABLE_STORAGE_REQUIRED(self) -> bool:
+        load_dotenv()
+        return os.getenv("DURABLE_STORAGE_REQUIRED", "false").strip().lower() in ("true", "1", "yes")
 
     @property
     def WEB_PUSH_VAPID_PUBLIC_KEY(self) -> str:
