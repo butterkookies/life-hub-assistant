@@ -94,3 +94,10 @@ All configuration sheets, settings modals, and contextual menus must adopt genui
 - [ ] User profile avatars have zero overlapping badges.
 - [ ] Touch feedback is responsive on pointer-down.
 - [ ] Dark and Light themes have calibrated contrast without washed-out grays.
+
+---
+
+## 7. Avatar & Procedural Character Roadmap
+- **Designated Avatar Lab Engine**: `git@github.com:smontlouis/bible-strong-avatar-lab.git` (Demo: [avatars.bible-strong.app](https://avatars.bible-strong.app))
+- **Architecture & Capabilities**: Procedural 2D "fake 3D" SVG rendering, independent eye and expression controls, ambient animations (blinking, breathing), and portable `.avatar.json` export.
+- **Planned Integration**: To be used for procedural avatar customization and rich emotion transitions for the assistant mascot and Andrei's user profile avatar.
