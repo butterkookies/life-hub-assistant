@@ -2,9 +2,8 @@
 
 import contextlib
 import sqlite3
-import threading
 from pathlib import Path
-from typing import Any, Generator, Optional, Sequence
+from typing import Any, Generator, Sequence
 
 from config import settings
 
@@ -171,11 +170,6 @@ class DatabaseConnection:
         self.raw.rollback()
 
 
-_pool: Any = None
-_pool_url: Optional[str] = None
-_pool_lock = threading.Lock()
-
-
 def is_postgres() -> bool:
     return bool(settings.DATABASE_URL)
 
@@ -194,38 +188,8 @@ def get_upload_dir() -> str:
     return str(upload_dir.resolve())
 
 
-def _get_postgres_pool():
-    global _pool, _pool_url
-    url = settings.DATABASE_URL
-    if not url:
-        raise RuntimeError("DATABASE_URL is not configured")
-    with _pool_lock:
-        if _pool is None or _pool_url != url:
-            if _pool is not None:
-                _pool.close()
-            from psycopg.rows import dict_row
-            from psycopg_pool import ConnectionPool
-
-            _pool = ConnectionPool(
-                conninfo=url,
-                min_size=1,
-                max_size=5,
-                timeout=60,
-                kwargs={"row_factory": dict_row},
-                open=True,
-            )
-            _pool.wait(timeout=60)
-            _pool_url = url
-    return _pool
-
-
 def close_db() -> None:
-    global _pool, _pool_url
-    with _pool_lock:
-        if _pool is not None:
-            _pool.close()
-        _pool = None
-        _pool_url = None
+    """Retained for lifecycle symmetry; PostgreSQL connections close per use."""
 
 
 def init_db() -> None:
@@ -276,8 +240,14 @@ def init_db() -> None:
 def get_db() -> Generator[DatabaseConnection, None, None]:
     """Yield a transactional connection with mapping-style result rows."""
     if is_postgres():
-        pool = _get_postgres_pool()
-        with pool.connection() as raw:
+        from psycopg import connect
+        from psycopg.rows import dict_row
+
+        with connect(
+            settings.DATABASE_URL,
+            connect_timeout=60,
+            row_factory=dict_row,
+        ) as raw:
             conn = DatabaseConnection(raw, postgres=True)
             try:
                 yield conn
