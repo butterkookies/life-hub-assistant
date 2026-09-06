@@ -208,13 +208,13 @@ def _get_postgres_pool():
 
             _pool = ConnectionPool(
                 conninfo=url,
-                min_size=0,
+                min_size=1,
                 max_size=5,
-                timeout=10,
+                timeout=60,
                 kwargs={"row_factory": dict_row},
                 open=True,
             )
-            _pool.wait(timeout=15)
+            _pool.wait(timeout=60)
             _pool_url = url
     return _pool
 
