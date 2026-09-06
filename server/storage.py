@@ -1,7 +1,8 @@
 """Private attachment storage backed by local disk or Cloudflare R2."""
 
 import logging
-from datetime import datetime, timezone
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -11,10 +12,26 @@ from server.database import get_upload_dir
 logger = logging.getLogger("server.storage")
 
 
+class StorageQuotaExceeded(RuntimeError):
+    """Raised before an R2 operation would cross an application safety limit."""
+
+    def __init__(self, metric: str, limit: int):
+        self.metric = metric
+        self.limit = limit
+        labels = {
+            "storage": "5 GB storage",
+            "writes": "rolling 31-day write",
+            "reads": "rolling 31-day read",
+        }
+        label = labels.get(metric, metric)
+        super().__init__(f"Life Hub stopped this request before its {label} safety limit was crossed.")
+
+
 class ObjectStorage:
     def __init__(self) -> None:
         self._client = None
         self._client_config: Optional[tuple[str, str, str]] = None
+        self._usage_lock = threading.Lock()
 
     def is_remote(self) -> bool:
         return bool(
@@ -47,7 +64,9 @@ class ObjectStorage:
 
     def validate(self) -> None:
         if self.is_remote():
-            self._r2_client().head_bucket(Bucket=settings.R2_BUCKET)
+            with self._usage_lock:
+                self._reserve_operation("reads", settings.R2_MAX_READS_31D)
+                self._r2_client().head_bucket(Bucket=settings.R2_BUCKET)
             return
         Path(get_upload_dir()).mkdir(parents=True, exist_ok=True)
 
@@ -63,12 +82,20 @@ class ObjectStorage:
 
     def put_bytes(self, key: str, content: bytes, content_type: str) -> None:
         if self.is_remote():
-            self._r2_client().put_object(
-                Bucket=settings.R2_BUCKET,
-                Key=key,
-                Body=content,
-                ContentType=content_type,
-            )
+            with self._usage_lock:
+                self._ensure_storage_capacity(key, len(content))
+                self._reserve_operation("writes", settings.R2_MAX_WRITES_31D)
+                self._r2_client().put_object(
+                    Bucket=settings.R2_BUCKET,
+                    Key=key,
+                    Body=content,
+                    ContentType=content_type,
+                )
+                try:
+                    self._record_object(key, len(content))
+                except Exception:
+                    self._r2_client().delete_object(Bucket=settings.R2_BUCKET, Key=key)
+                    raise
             return
         path = self._local_path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -76,8 +103,10 @@ class ObjectStorage:
 
     def get_bytes(self, key: str) -> bytes:
         if self.is_remote():
-            response = self._r2_client().get_object(Bucket=settings.R2_BUCKET, Key=key)
-            return response["Body"].read()
+            with self._usage_lock:
+                self._reserve_operation("reads", settings.R2_MAX_READS_31D)
+                response = self._r2_client().get_object(Bucket=settings.R2_BUCKET, Key=key)
+                return response["Body"].read()
         return self._local_path(key).read_bytes()
 
     def delete(self, key: str) -> None:
@@ -85,6 +114,7 @@ class ObjectStorage:
             return
         if self.is_remote():
             self._r2_client().delete_object(Bucket=settings.R2_BUCKET, Key=key)
+            self._forget_object(key)
             return
         path = self._local_path(key)
         if path.exists():
@@ -141,6 +171,92 @@ class ObjectStorage:
                 logger.warning("Queued object cleanup still failing for %s: %s", key, exc)
                 self._queue_cleanup(key, exc)
         return completed
+
+    def quota_snapshot(self) -> dict[str, int]:
+        """Return tracked remote storage and rolling operation totals."""
+        from server.database import get_db
+
+        cutoff = (datetime.now(timezone.utc).date() - timedelta(days=30)).isoformat()
+        with get_db() as db:
+            storage = db.execute(
+                "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM storage_objects"
+            ).fetchone()
+            operations = db.execute(
+                """
+                SELECT metric, COALESCE(SUM(operation_count), 0) AS total
+                FROM storage_usage_daily
+                WHERE usage_date >= ?
+                GROUP BY metric
+                """,
+                (cutoff,),
+            ).fetchall()
+        totals = {"storage_bytes": int(storage["total"]), "writes_31d": 0, "reads_31d": 0}
+        for row in operations:
+            totals[f"{row['metric']}_31d"] = int(row["total"])
+        return totals
+
+    def _ensure_storage_capacity(self, key: str, new_size: int) -> None:
+        from server.database import get_db
+
+        with get_db() as db:
+            total_row = db.execute(
+                "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM storage_objects"
+            ).fetchone()
+            existing_row = db.execute(
+                "SELECT size_bytes FROM storage_objects WHERE object_key = ?", (key,)
+            ).fetchone()
+        current_total = int(total_row["total"])
+        existing_size = int(existing_row["size_bytes"]) if existing_row else 0
+        projected = current_total - existing_size + new_size
+        if projected > settings.R2_MAX_STORAGE_BYTES:
+            raise StorageQuotaExceeded("storage", settings.R2_MAX_STORAGE_BYTES)
+
+    def _reserve_operation(self, metric: str, limit: int) -> None:
+        from server.database import get_db
+
+        today = datetime.now(timezone.utc).date()
+        cutoff = (today - timedelta(days=30)).isoformat()
+        with get_db() as db:
+            row = db.execute(
+                """
+                SELECT COALESCE(SUM(operation_count), 0) AS total
+                FROM storage_usage_daily
+                WHERE metric = ? AND usage_date >= ?
+                """,
+                (metric, cutoff),
+            ).fetchone()
+            if int(row["total"]) >= limit:
+                raise StorageQuotaExceeded(metric, limit)
+            db.execute(
+                """
+                INSERT INTO storage_usage_daily (usage_date, metric, operation_count)
+                VALUES (?, ?, 1)
+                ON CONFLICT(usage_date, metric) DO UPDATE SET
+                    operation_count = storage_usage_daily.operation_count + 1
+                """,
+                (today.isoformat(), metric),
+            )
+
+    def _record_object(self, key: str, size_bytes: int) -> None:
+        from server.database import get_db
+
+        with get_db() as db:
+            db.execute(
+                """
+                INSERT INTO storage_objects (object_key, size_bytes, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(object_key) DO UPDATE SET
+                    size_bytes = excluded.size_bytes,
+                    created_at = excluded.created_at
+                """,
+                (key, size_bytes, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def _forget_object(self, key: str) -> None:
+        from server.database import get_db
+
+        with get_db() as db:
+            db.execute("DELETE FROM storage_objects WHERE object_key = ?", (key,))
 
     def _local_path(self, key: str) -> Path:
         candidate = Path(key)

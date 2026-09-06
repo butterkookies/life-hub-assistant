@@ -291,10 +291,7 @@ class WorkoutScanService:
             if not scan:
                 raise ValueError("Scan does not contain treadmill values")
 
-            try:
-                image_bytes = object_storage.get_bytes(str(row["image_path"]))
-            except Exception:
-                image_bytes = b""
+            image_path = str(row["image_path"])
 
             shown_conflicts = None
             if row["shown_conflicts_json"]:
@@ -302,6 +299,11 @@ class WorkoutScanService:
                     shown_conflicts = json.loads(row["shown_conflicts_json"])
                 except Exception:
                     pass
+
+        try:
+            image_bytes = object_storage.get_bytes(image_path)
+        except Exception:
+            image_bytes = b""
 
         loop = asyncio.get_running_loop()
         result: WorkoutUpsertResult = await loop.run_in_executor(

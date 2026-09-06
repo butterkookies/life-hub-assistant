@@ -201,6 +201,30 @@ class Settings:
         return os.getenv("R2_BUCKET", "").strip()
 
     @property
+    def R2_MAX_STORAGE_BYTES(self) -> int:
+        load_dotenv()
+        try:
+            return int(os.getenv("R2_MAX_STORAGE_BYTES", str(5 * 1024**3)))
+        except ValueError:
+            return 5 * 1024**3
+
+    @property
+    def R2_MAX_WRITES_31D(self) -> int:
+        load_dotenv()
+        try:
+            return int(os.getenv("R2_MAX_WRITES_31D", "100000"))
+        except ValueError:
+            return 100000
+
+    @property
+    def R2_MAX_READS_31D(self) -> int:
+        load_dotenv()
+        try:
+            return int(os.getenv("R2_MAX_READS_31D", "1000000"))
+        except ValueError:
+            return 1000000
+
+    @property
     def BRIEFING_TRIGGER_TOKEN(self) -> str:
         load_dotenv()
         return os.getenv("BRIEFING_TRIGGER_TOKEN", "").strip()

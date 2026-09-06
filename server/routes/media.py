@@ -26,7 +26,7 @@ from server.services.workout_scan_service import (
     validate_image_bytes,
     workout_scan_service,
 )
-from server.storage import object_storage
+from server.storage import StorageQuotaExceeded, object_storage
 
 logger = logging.getLogger("server.media")
 
@@ -80,7 +80,13 @@ async def upload_attachment(
     safe_basename = Path(raw_filename).name  # Prevent path traversal
     att_id = str(uuid.uuid4())
     storage_key = object_storage.attachment_key(user.id, att_id, safe_basename)
-    await asyncio.to_thread(object_storage.put_bytes, storage_key, file_bytes, declared_mime)
+    try:
+        await asyncio.to_thread(object_storage.put_bytes, storage_key, file_bytes, declared_mime)
+    except StorageQuotaExceeded as err:
+        raise HTTPException(
+            status_code=507,
+            detail={"code": "STORAGE_SAFETY_LIMIT", "message": str(err)},
+        )
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -205,6 +211,14 @@ async def upload_attachment(
                         created_at=msg.created_at
                     )
                 }
+        except StorageQuotaExceeded as err:
+            with get_db() as db:
+                db.execute("DELETE FROM attachments WHERE id = ? AND user_id = ?", (att_id, user.id))
+            await asyncio.to_thread(object_storage.delete_quietly, storage_key)
+            raise HTTPException(
+                status_code=507,
+                detail={"code": "STORAGE_SAFETY_LIMIT", "message": str(err)},
+            )
         except ValueError as err:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -243,25 +257,33 @@ async def get_attachment(
                 detail={"code": "ATTACHMENT_NOT_FOUND", "message": "Attachment not found."}
             )
 
-        try:
-            content = await asyncio.to_thread(object_storage.get_bytes, str(row["file_path"]))
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "FILE_MISSING", "message": "Stored file is missing."}
-            )
-
+        storage_key = str(row["file_path"])
         filename = str(row["filename"])
-        encoded_filename = quote(filename, safe="")
-        return Response(
-            content=content,
-            media_type=str(row["mime_type"]),
-            headers={
-                "Content-Disposition": (
-                    f"inline; filename=attachment; filename*=UTF-8''{encoded_filename}"
-                )
-            }
+        mime_type = str(row["mime_type"])
+
+    try:
+        content = await asyncio.to_thread(object_storage.get_bytes, storage_key)
+    except StorageQuotaExceeded as err:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": "STORAGE_SAFETY_LIMIT", "message": str(err)},
         )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "FILE_MISSING", "message": "Stored file is missing."}
+        )
+
+    encoded_filename = quote(filename, safe="")
+    return Response(
+        content=content,
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": (
+                f"inline; filename=attachment; filename*=UTF-8''{encoded_filename}"
+            )
+        }
+    )
 
 # Image Scan Confirmations
 @router.post("/api/image-scans/{token}/confirm")

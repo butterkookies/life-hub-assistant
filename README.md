@@ -101,6 +101,9 @@ R2_ENDPOINT_URL="https://ACCOUNT_ID.r2.cloudflarestorage.com"
 R2_ACCESS_KEY_ID="your_r2_access_key"
 R2_SECRET_ACCESS_KEY="your_r2_secret"
 R2_BUCKET="life-hub-uploads"
+R2_MAX_STORAGE_BYTES="5368709120"
+R2_MAX_WRITES_31D="100000"
+R2_MAX_READS_31D="1000000"
 BRIEFING_TRIGGER_TOKEN="a_long_random_scheduler_secret"
 
 # ==============================================================================
@@ -187,6 +190,8 @@ python restore_database.py -f backups/life_hub_backup_20260904_102632.db
 python scripts/migrate_sqlite_to_durable.py --dry-run
 python scripts/migrate_sqlite_to_durable.py
 ```
+
+Hosted R2 access is guarded below the provider's free allowance. Life Hub stops new operations at 5 GB stored, 100,000 writes, or 1,000,000 reads during any rolling 31-day window. These conservative application limits are tracked in PostgreSQL.
 
 ---
 

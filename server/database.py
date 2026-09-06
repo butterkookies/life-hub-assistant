@@ -114,6 +114,22 @@ CREATE TABLE IF NOT EXISTS object_cleanup_queue (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS storage_objects (
+    object_key TEXT PRIMARY KEY,
+    size_bytes INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS storage_usage_daily (
+    usage_date TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    operation_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(usage_date, metric)
+);
+
+CREATE INDEX IF NOT EXISTS idx_storage_usage_metric_date
+    ON storage_usage_daily(metric, usage_date);
+
 CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations(user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_messages_client_id ON messages(conversation_id, client_message_id);

@@ -20,6 +20,12 @@ services:
         sync: false
       - key: R2_BUCKET
         sync: false
+      - key: R2_MAX_STORAGE_BYTES
+        value: "5368709120"
+      - key: R2_MAX_WRITES_31D
+        value: "100000"
+      - key: R2_MAX_READS_31D
+        value: "1000000"
       - key: BRIEFING_TRIGGER_TOKEN
         sync: false
       - key: DURABLE_STORAGE_REQUIRED

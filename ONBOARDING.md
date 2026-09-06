@@ -300,6 +300,8 @@ Located in [`server/database.py`](file:///c:/Users/user/Documents/ANDREI_FILES/N
   - `briefing_deliveries`: Delivery audit log preventing duplicate morning briefings per day.
   - `briefing_runs`: Date-level dispatch claim preventing duplicate generation across scheduler retries.
   - `object_cleanup_queue`: Failed R2 deletions retained for retry on the next process start.
+  - `storage_objects`: Object sizes used to enforce the 5 GB hosted-storage ceiling.
+  - `storage_usage_daily`: Daily R2 operation counts used for rolling 31-day limits.
 - **Network Idempotency**:
   - PWA generates a unique `client_message_id` for every outgoing message.
   - If a mobile connection stutters and retries, the backend returns the existing message without re-invoking Gemini or creating duplicate Notion entries.
@@ -386,6 +388,9 @@ R2_ENDPOINT_URL=https://ACCOUNT_ID.r2.cloudflarestorage.com
 R2_ACCESS_KEY_ID=your_r2_access_key
 R2_SECRET_ACCESS_KEY=your_r2_secret
 R2_BUCKET=life-hub-uploads
+R2_MAX_STORAGE_BYTES=5368709120
+R2_MAX_WRITES_31D=100000
+R2_MAX_READS_31D=1000000
 DURABLE_STORAGE_REQUIRED=true
 BRIEFING_TRIGGER_TOKEN=generate_a_long_random_scheduler_secret
 
